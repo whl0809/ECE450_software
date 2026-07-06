@@ -1,0 +1,139 @@
+# Example Raspberry Pi 5 runtime configuration.
+# Copy this file to a local, untracked configuration only after the actual
+# wiring, Linux adapter paths, gpiochip identity, line offsets, and permissions
+# are confirmed.
+
+[i2c.primary]
+# path = "/dev/i2c-UNCONFIRMED"
+# Expected Board 1 signals: SENSOR_SCL, SENSOR_SDA, DGND.
+# Confirm Raspberry Pi header wiring and common ground before enabling.
+# Board 1 and Board 2 SHT45 provisionally share this adapter.
+
+[i2c.secondary]
+# path = "/dev/i2c-UNCONFIRMED"
+# Optional future override if Board 2 SHT45 needs a separate adapter.
+# Expected Board 2 SHT45 pads: Pad 1 SDA, Pad 2 SCL, Pad 4 AGND.
+# Do not connect Raspberry Pi 3.3 V to SHT45 Pad 3 under the current
+# independent-power plan.
+
+[sensors.sht45]
+enabled = true
+address = "0x44"
+sample_interval_ms = 1000
+precision = "high"
+heater = "off"
+crc = "required"
+i2c_adapter = "primary"
+
+[sensors.sgp41]
+enabled = true
+address = "0x59"
+sample_interval_ms = 1000
+use_sht45_compensation = true
+compensation_max_age_ms = 5000
+retain_sraw_voc = true
+retain_sraw_nox = true
+i2c_adapter = "primary"
+
+[sensors.nh3_mcp3421]
+enabled = true
+address = "0x69"
+i2c_adapter = "primary"
+resolution_bits = 16
+pga_gain = 1
+conversion_mode = "one_shot"
+retain_signed_raw_code = true
+retain_differential_voltage = true
+
+[sensors.h2s_mcp3421]
+enabled = true
+address = "0x6A"
+i2c_adapter = "primary"
+resolution_bits = 16
+pga_gain = 1
+conversion_mode = "one_shot"
+retain_signed_raw_code = true
+retain_differential_voltage = true
+
+[sensors.bme690]
+enabled = true
+address = "0x76"
+i2c_adapter = "primary"
+measurement_mode = "forced"
+measurement_interval_ms = 1000
+temperature_oversampling = "x2"
+humidity_oversampling = "x1"
+pressure_oversampling = "x4"
+iir_filter_coefficient = 3
+heater_temperature_c = 320
+heater_duration_ms = 150
+outputs = ["temperature_c", "humidity_rh", "pressure_pa", "gas_resistance_ohm", "gas_valid", "heater_stable"]
+# BME690 mode selection is confirmed: CSB -> VDD3V3, SDO -> DGND.
+# Driver compensation and heater-register setup follow Bosch's BME690 SensorAPI.
+
+[electrochemical.nh3]
+part = "ES1-NH3-100"
+mcp3421 = "MCP3421A1T-E/CH"
+jp2 = "OPEN"
+electrode_mode = "three-electrode-provisional"
+vbias_nominal_v = 1.65
+tia_feedback_resistance_ohm = 1000000
+signal_polarity = "UNVALIDATED"
+
+[electrochemical.h2s]
+part = "ES1-H2S-100"
+mcp3421 = "MCP3421A2T-E/CH"
+jp2 = "OPEN"
+electrode_mode = "three-electrode-provisional"
+vbias_nominal_v = 1.65
+tia_feedback_resistance_ohm = 1000000
+signal_polarity = "UNVALIDATED"
+
+[tgs_array]
+aincom = "AGND"
+load_resistance_ohm_approx = 10000
+buffer = "OPA2192 unity gain"
+channels = [
+  { ads_ain = 0, model = "TGS2610", signal = "TGS2610_VOUT" },
+  { ads_ain = 1, model = "TGS2620", signal = "TGS2620_VOUT" },
+  { ads_ain = 2, model = "TGS2603", signal = "TGS2603_VOUT" },
+  { ads_ain = 3, model = "TGS2602", signal = "TGS2602_VOUT" },
+  { ads_ain = 4, model = "TGS2600", signal = "TGS2600_VOUT" },
+  { ads_ain = 5, model = "TGS2611", signal = "TGS2611_VOUT" },
+]
+
+[ads114s06.spi]
+# device = "/dev/spidevUNCONFIRMED"
+mode = 1
+# bits_per_word = 8
+# max_speed_hz remains provisional until verified against wiring and datasheet timing.
+max_speed_hz = 1000000
+reference_voltage_v = 4.096
+pga_gain = 1
+data_rate_code = "PROVISIONAL_RUNTIME_CONFIG_REQUIRED"
+filter_code = "PROVISIONAL_RUNTIME_CONFIG_REQUIRED"
+conversion_mode = "single_shot_per_channel"
+verify_register_readback = true
+wait_for_drdy_when_configured = true
+output = "signed_raw_code_and_adc_input_voltage_only"
+cs_behavior = "permanently_asserted_on_board"
+reset_behavior = "tied_to_iovdd_on_board"
+clock_source = "internal_clock_configuration_clk_tied_to_dgnd"
+
+[ads114s06.gpio]
+# gpiochip = "/dev/gpiochipUNCONFIRMED"
+# drdy_line_offset = "UNCONFIRMED"
+# start_line_offset = "UNCONFIRMED"
+# No ADS114S06 CS or RESET GPIO exists in the confirmed board design.
+
+[power]
+raspberry_pi = "independently_powered"
+board_1 = "independently_powered_usb_c"
+board_2 = "independently_powered_usb_c"
+grounding = "common_ground_required"
+do_not_parallel_pi_power_rails = true
+
+[logging.raw_csv]
+enabled = false
+schema_version = 1
+# output_path = "UNCONFIGURED"
