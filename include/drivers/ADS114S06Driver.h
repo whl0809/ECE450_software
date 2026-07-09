@@ -27,6 +27,7 @@ struct ADS114S06DiagnosticEvent {
     uint8_t registerAddress = 0;
     std::vector<uint8_t> txBytes;
     std::vector<uint8_t> rxBytes;
+    bool hasComparison = false;
     uint8_t requestedWriteValue = 0;
     uint8_t extractedReadbackValue = 0;
     uint8_t readbackMask = 0xFF;

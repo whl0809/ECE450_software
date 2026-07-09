@@ -121,15 +121,17 @@ void printAdsDiagnosticEvent(const odor::ADS114S06DiagnosticEvent& event)
               << static_cast<int>(event.registerAddress)
               << std::dec
               << ",tx=" << bytesToHex(event.txBytes)
-              << ",rx=" << bytesToHex(event.rxBytes)
-              << ",requested=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-              << static_cast<int>(event.requestedWriteValue)
-              << ",readback=0x" << std::setw(2) << static_cast<int>(event.extractedReadbackValue)
-              << ",mask=0x" << std::setw(2) << static_cast<int>(event.readbackMask)
-              << ",masked_expected=0x" << std::setw(2) << static_cast<int>(event.maskedExpected)
-              << ",masked_actual=0x" << std::setw(2) << static_cast<int>(event.maskedActual)
-              << std::dec
-              << ",error_flags=" << event.errorFlags << '\n';
+              << ",rx=" << bytesToHex(event.rxBytes);
+    if (event.hasComparison) {
+        std::cout << ",requested=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                  << static_cast<int>(event.requestedWriteValue)
+                  << ",readback=0x" << std::setw(2) << static_cast<int>(event.extractedReadbackValue)
+                  << ",mask=0x" << std::setw(2) << static_cast<int>(event.readbackMask)
+                  << ",masked_expected=0x" << std::setw(2) << static_cast<int>(event.maskedExpected)
+                  << ",masked_actual=0x" << std::setw(2) << static_cast<int>(event.maskedActual)
+                  << std::dec;
+    }
+    std::cout << ",error_flags=" << event.errorFlags << '\n';
 }
 
 int runMockApplication()

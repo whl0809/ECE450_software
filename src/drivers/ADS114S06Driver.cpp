@@ -24,8 +24,8 @@ constexpr uint8_t AdsRegisterDatarate = 0x04;
 constexpr uint8_t AdsRegisterRef = 0x05;
 constexpr uint8_t AdsAincom = 0x0C;
 constexpr uint8_t AdsRequiredSpiMode = 1;
-constexpr uint8_t AdsDeviceIdMask = 0xE0;
-constexpr uint8_t Ads114S06DeviceIdExpected = 0x00;
+constexpr uint8_t AdsDeviceIdMask = 0x07;
+constexpr uint8_t Ads114S06DeviceIdExpected = 0x05;
 
 float adsGainValue(config::Ads114s06PgaGain gain)
 {
@@ -188,6 +188,8 @@ OperationResult ADS114S06Driver::readDeviceId()
     ADS114S06DiagnosticEvent event;
     event.stage = "device_id_verify";
     event.registerAddress = AdsRegisterId;
+    event.hasComparison = true;
+    event.requestedWriteValue = Ads114S06DeviceIdExpected;
     event.extractedReadbackValue = readback;
     event.readbackMask = AdsDeviceIdMask;
     event.maskedExpected = maskedExpected;
@@ -286,6 +288,7 @@ OperationResult ADS114S06Driver::verifyMaskedRegister(uint8_t reg,
     ADS114S06DiagnosticEvent event;
     event.stage = stage + "_masked_compare";
     event.registerAddress = reg;
+    event.hasComparison = true;
     event.requestedWriteValue = requestedValue;
     event.extractedReadbackValue = readback;
     event.readbackMask = readbackMask;

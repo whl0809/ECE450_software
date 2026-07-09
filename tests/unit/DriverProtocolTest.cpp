@@ -103,12 +103,17 @@ void queueAdsRegisterCheck(odor::hardware::mock::MockSPIDevice& spi, uint8_t val
     spi.queueRxData({0x00, 0x00, value});
 }
 
-void queueAdsBegin(odor::hardware::mock::MockSPIDevice& spi)
+void queueAdsBeginWithId(odor::hardware::mock::MockSPIDevice& spi, uint8_t deviceIdRegister)
 {
-    spi.queueRxData({0x00, 0x00, 0x00});  // ID register masked device bits for ADS114S06
+    spi.queueRxData({0x00, 0x00, deviceIdRegister});
     queueAdsRegisterCheck(spi, 0x00);
     queueAdsRegisterCheck(spi, 0x14);
     queueAdsRegisterCheck(spi, 0x00);
+}
+
+void queueAdsBegin(odor::hardware::mock::MockSPIDevice& spi)
+{
+    queueAdsBeginWithId(spi, 0x05);  // ADS114S06 DEV_ID is in ID register bits 2:0.
 }
 
 void queueAdsChannelRead(odor::hardware::mock::MockSPIDevice& spi, uint8_t muxValue, int16_t sample)
@@ -215,11 +220,18 @@ int main()
         expect(events.size() >= 8U);
         expect(events[0].stage == "device_id_read_rreg");
         expect(events[0].txBytes == std::vector<uint8_t>({0x20, 0x00, 0x00}));
-        expect(events[0].extractedReadbackValue == 0x00);
+        expect(!events[0].hasComparison);
+        expect(events[0].extractedReadbackValue == 0x05);
         expect(events[1].stage == "device_id_verify");
-        expect(events[1].readbackMask == 0xE0);
+        expect(events[1].hasComparison);
+        expect(events[1].readbackMask == 0x07);
+        expect(events[1].requestedWriteValue == 0x05);
+        expect(events[1].maskedExpected == 0x05);
+        expect(events[1].maskedActual == 0x05);
         expect(events[2].txBytes == std::vector<uint8_t>({0x43, 0x00, 0x00}));
+        expect(!events[2].hasComparison);
         expect(events[3].txBytes == std::vector<uint8_t>({0x23, 0x00, 0x00}));
+        expect(!events[3].hasComparison);
         expect(events[4].maskedExpected == events[4].maskedActual);
         odor::TgsArrayMeasurement measurement;
         expect(driver.readTgsArray(measurement).ok);
@@ -230,7 +242,7 @@ int main()
 
     {
         odor::hardware::mock::MockSPIDevice spi(true);
-        spi.queueRxData({0x00, 0x00, 0xE0});
+        spi.queueRxData({0x00, 0x00, 0xFF});
         odor::ADS114S06Driver driver(spi, {true, false, true, true, false, 4.096F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
         driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
@@ -240,12 +252,39 @@ int main()
         expect(odor::hasError(driver.status().errorFlags, odor::ErrorFlag::DeviceNotDetected));
         expect(events.size() == 2U);
         expect(events.back().stage == "device_id_verify");
-        expect(events.back().maskedActual == 0xE0);
+        expect(events.back().hasComparison);
+        expect(events.back().readbackMask == 0x07);
+        expect(events.back().requestedWriteValue == 0x05);
+        expect(events.back().extractedReadbackValue == 0xFF);
+        expect(events.back().maskedExpected == 0x05);
+        expect(events.back().maskedActual == 0x07);
+    }
+
+    {
+        const std::vector<uint8_t> idsWithMatchingLowBits = {0x05, 0x25, 0xA5, 0xFD};
+        for (uint8_t idRegister : idsWithMatchingLowBits) {
+            odor::hardware::mock::MockSPIDevice spi(true);
+            queueAdsBeginWithId(spi, idRegister);
+            odor::ADS114S06Driver driver(spi, {true, false, true, true, false, 4.096F, odor::config::Ads114s06Defaults});
+            std::vector<odor::ADS114S06DiagnosticEvent> events;
+            driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
+                events.push_back(event);
+            });
+            expect(driver.begin().ok);
+            expect(events.size() >= 2U);
+            expect(events[1].stage == "device_id_verify");
+            expect(events[1].hasComparison);
+            expect(events[1].readbackMask == 0x07);
+            expect(events[1].requestedWriteValue == 0x05);
+            expect(events[1].extractedReadbackValue == idRegister);
+            expect(events[1].maskedExpected == 0x05);
+            expect(events[1].maskedActual == 0x05);
+        }
     }
 
     {
         odor::hardware::mock::MockSPIDevice spi(true);
-        spi.queueRxData({0x00, 0x00, 0x00});
+        spi.queueRxData({0x00, 0x00, 0x05});
         queueAdsRegisterCheck(spi, 0x01);
         odor::ADS114S06Driver driver(spi, {true, false, true, true, false, 4.096F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
