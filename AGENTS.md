@@ -31,6 +31,15 @@ This does **not** mean the system is hardware-verified.
 
 This specific Raspberry Pi 5 has now been inspected. The initial Linux device paths, GPIO controller, and Pi-to-board signal assignments are selected and may be used in a machine-specific runtime configuration.
 
+Pi-native diagnostic execution has occurred with only the ADS114S06/TGS PCB connected. The observed ADS diagnostic result before the current debug-instrumentation update was:
+
+```text
+diagnostic,ads114s06_begin,ok=false,error_flags=10240
+diagnostic,ads114s06_read_tgs_array,ok=false,error_flags=10241
+```
+
+At that time, Linux SPI transfers reported success, but ADS114S06 initialization stopped during register readback verification in `ADS114S06Driver::writeRegisterChecked()`. This is an observed diagnostic failure, not a demonstrated root cause. Updated diagnostics must be rerun on the Raspberry Pi with the connected PCB before ADS communication, START/DRDY behavior, or six-channel TGS acquisition can be considered hardware-validated.
+
 The next phase is native build and physical-board validation:
 
 1. Add or update the machine-specific runtime configuration with the selected paths and GPIO mappings in Section 3.

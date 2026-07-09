@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <fstream>
 
 #include "app/RuntimeConfig.h"
@@ -50,6 +51,45 @@ int main()
 
     config.adsSpiMode = 0;
     failures += expect(!odor::app::validateRuntimeConfigValues(config).ok);
+
+    const char* tgsOnlyPath = "tgs-only-test.toml";
+    {
+        std::ofstream out(tgsOnlyPath);
+        out << "[sensors.sht45]\n"
+            << "enabled = false\n"
+            << "[sensors.sgp41]\n"
+            << "enabled = false\n"
+            << "[sensors.bme690]\n"
+            << "enabled = false\n"
+            << "[sensors.nh3_mcp3421]\n"
+            << "enabled = false\n"
+            << "[sensors.h2s_mcp3421]\n"
+            << "enabled = false\n"
+            << "[ads114s06]\n"
+            << "enabled = true\n"
+            << "[ads114s06.spi]\n"
+            << "device = \"/dev/spidev0.0\"\n"
+            << "mode = 1\n"
+            << "bits_per_word = 8\n"
+            << "max_speed_hz = 1000000\n"
+            << "[ads114s06.gpio]\n"
+            << "gpiochip = \"/dev/gpiochip4\"\n"
+            << "expected_label = \"pinctrl-rp1\"\n"
+            << "start_line_offset = 17\n"
+            << "start_active_low = false\n"
+            << "drdy_line_offset = 27\n"
+            << "drdy_active_low = true\n";
+    }
+    const odor::app::ConfigLoadResult tgsOnly = odor::app::loadRuntimeConfig(tgsOnlyPath);
+    failures += expect(tgsOnly.ok);
+    failures += expect(!tgsOnly.config.enableSht45);
+    failures += expect(!tgsOnly.config.enableSgp41);
+    failures += expect(!tgsOnly.config.enableBme690);
+    failures += expect(!tgsOnly.config.enableNh3Mcp3421);
+    failures += expect(!tgsOnly.config.enableH2sMcp3421);
+    failures += expect(tgsOnly.config.enableAds114s06);
+    failures += expect(odor::app::validateRuntimeConfigValues(tgsOnly.config).ok);
+    std::remove(tgsOnlyPath);
 
     return failures;
 }

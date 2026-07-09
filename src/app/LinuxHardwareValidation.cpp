@@ -59,10 +59,19 @@ void validateGpioLineRequest(ValidationResult& result,
 ValidationResult validateLinuxHardwareAccess(const RuntimeConfig& config)
 {
     ValidationResult result;
-    validateOpenReadWrite(result, config.primaryI2c.path, "I2C adapter");
+    const bool anyI2cSensor = config.enableSht45 || config.enableSgp41 ||
+                              config.enableBme690 || config.enableNh3Mcp3421 ||
+                              config.enableH2sMcp3421;
+    if (anyI2cSensor) {
+        validateOpenReadWrite(result, config.primaryI2c.path, "I2C adapter");
 
-    if (!config.secondaryI2c.path.empty() && config.secondaryI2c.path != config.primaryI2c.path) {
-        validateOpenReadWrite(result, config.secondaryI2c.path, "secondary I2C adapter");
+        if (!config.secondaryI2c.path.empty() && config.secondaryI2c.path != config.primaryI2c.path) {
+            validateOpenReadWrite(result, config.secondaryI2c.path, "secondary I2C adapter");
+        }
+    }
+
+    if (!config.enableAds114s06) {
+        return result;
     }
 
     validateOpenReadWrite(result, config.adsSpiDevice, "SPI device");

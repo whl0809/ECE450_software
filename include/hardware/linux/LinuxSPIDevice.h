@@ -27,11 +27,17 @@ public:
 
     bool isConfigured() const override;
     std::string description() const override;
+    uint8_t actualMode() const;
+    uint8_t actualBitsPerWord() const;
+    uint32_t actualMaxSpeedHz() const;
     HardwareResult transfer(const std::vector<uint8_t>& txBytes,
                             std::vector<uint8_t>& rxBytes) override;
 
 private:
     LinuxSPIConfig config_;
+    uint8_t actualMode_ = 0;
+    uint8_t actualBitsPerWord_ = 0;
+    uint32_t actualMaxSpeedHz_ = 0;
     int fd_ = -1;
 };
 

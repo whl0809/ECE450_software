@@ -101,22 +101,34 @@ OperationResult SensorManager::begin()
     frame_.systemState = SystemState::ConfigurationMissing;
 
     if constexpr (config::EnableTgsArray) {
+        if (profile_.enableTgsArray) {
         (void)ads114s06_.begin();
+        }
     }
     if constexpr (config::EnableNh3Sensor) {
+        if (profile_.enableNh3Sensor) {
         (void)nh3Mcp3421_.begin();
+        }
     }
     if constexpr (config::EnableH2sSensor) {
+        if (profile_.enableH2sSensor) {
         (void)h2sMcp3421_.begin();
+        }
     }
     if constexpr (config::EnableSht45) {
+        if (profile_.enableSht45) {
         (void)sht45_.begin();
+        }
     }
     if constexpr (config::EnableSgp41) {
+        if (profile_.enableSgp41) {
         (void)sgp41_.begin();
+        }
     }
     if constexpr (config::EnableBme690) {
+        if (profile_.enableBme690) {
         (void)bme690_.begin();
+        }
     }
 
     initialized_ = true;
@@ -163,6 +175,7 @@ void SensorManager::refreshDriverStatus()
     frame_.errorFlags = 0;
 
     if constexpr (config::EnableTgsArray) {
+        if (profile_.enableTgsArray) {
         const DriverStatus status = ads114s06_.status();
         frame_.tgs.valid = status.detected && status.errorFlags == 0;
         frame_.tgs.errorFlags = status.errorFlags;
@@ -170,9 +183,11 @@ void SensorManager::refreshDriverStatus()
             setValidFlag(frame_.validFlags, SensorGroup::TgsArray);
         }
         mergeStatus(status);
+        }
     }
 
     if constexpr (config::EnableNh3Sensor) {
+        if (profile_.enableNh3Sensor) {
         const DriverStatus status = nh3Mcp3421_.status();
         frame_.nh3.valid = status.detected && status.errorFlags == 0;
         frame_.nh3.errorFlags = status.errorFlags;
@@ -180,9 +195,11 @@ void SensorManager::refreshDriverStatus()
             setValidFlag(frame_.validFlags, SensorGroup::Nh3);
         }
         mergeStatus(status);
+        }
     }
 
     if constexpr (config::EnableH2sSensor) {
+        if (profile_.enableH2sSensor) {
         const DriverStatus status = h2sMcp3421_.status();
         frame_.h2s.valid = status.detected && status.errorFlags == 0;
         frame_.h2s.errorFlags = status.errorFlags;
@@ -190,9 +207,11 @@ void SensorManager::refreshDriverStatus()
             setValidFlag(frame_.validFlags, SensorGroup::H2s);
         }
         mergeStatus(status);
+        }
     }
 
     if constexpr (config::EnableSht45) {
+        if (profile_.enableSht45) {
         const DriverStatus status = sht45_.status();
         frame_.sht45.valid = status.detected && status.errorFlags == 0;
         frame_.sht45.errorFlags = status.errorFlags;
@@ -200,9 +219,11 @@ void SensorManager::refreshDriverStatus()
             setValidFlag(frame_.validFlags, SensorGroup::Sht45);
         }
         mergeStatus(status);
+        }
     }
 
     if constexpr (config::EnableSgp41) {
+        if (profile_.enableSgp41) {
         const DriverStatus status = sgp41_.status();
         frame_.sgp41.rawValid = status.detected && status.errorFlags == 0;
         frame_.sgp41.indexValid = false;
@@ -211,9 +232,11 @@ void SensorManager::refreshDriverStatus()
             setValidFlag(frame_.validFlags, SensorGroup::Sgp41);
         }
         mergeStatus(status);
+        }
     }
 
     if constexpr (config::EnableBme690) {
+        if (profile_.enableBme690) {
         const DriverStatus status = bme690_.status();
         frame_.bme690.valid = status.detected && status.errorFlags == 0;
         frame_.bme690.errorFlags = status.errorFlags;
@@ -221,6 +244,7 @@ void SensorManager::refreshDriverStatus()
             setValidFlag(frame_.validFlags, SensorGroup::Bme690);
         }
         mergeStatus(status);
+        }
     }
 }
 

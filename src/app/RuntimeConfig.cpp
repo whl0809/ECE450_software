@@ -98,6 +98,18 @@ void setKnownValue(RuntimeConfig& config,
         config.primaryI2c.path = unquote(value);
     } else if (section == "i2c.secondary" && key == "path") {
         config.secondaryI2c.path = unquote(value);
+    } else if (section == "sensors.sht45" && key == "enabled") {
+        config.enableSht45 = parseBool(value);
+    } else if (section == "sensors.sgp41" && key == "enabled") {
+        config.enableSgp41 = parseBool(value);
+    } else if (section == "sensors.bme690" && key == "enabled") {
+        config.enableBme690 = parseBool(value);
+    } else if (section == "sensors.nh3_mcp3421" && key == "enabled") {
+        config.enableNh3Mcp3421 = parseBool(value);
+    } else if (section == "sensors.h2s_mcp3421" && key == "enabled") {
+        config.enableH2sMcp3421 = parseBool(value);
+    } else if (section == "ads114s06" && key == "enabled") {
+        config.enableAds114s06 = parseBool(value);
     } else if (section == "ads114s06.spi" && key == "device") {
         config.adsSpiDevice = unquote(value);
     } else if (section == "ads114s06.spi" && key == "mode") {
@@ -191,16 +203,23 @@ ValidationResult validateRuntimeConfigValues(const RuntimeConfig& config)
         }
     };
 
-    require(!config.primaryI2c.path.empty(), "primary I2C adapter path is missing");
-    require(!config.adsSpiDevice.empty(), "ADS114S06 SPI device path is missing");
-    require(config.adsSpiMode == 1U, "ADS114S06 SPI mode must be 1");
-    require(config.adsBitsPerWord == 8U, "ADS114S06 SPI bits_per_word must be 8");
-    require(config.adsMaxSpeedHz > 0U, "ADS114S06 SPI max_speed_hz must be nonzero");
-    require(config.adsMaxSpeedHz <= 1000000U, "ADS114S06 provisional SPI clock must not exceed 1 MHz");
-    require(!config.gpioChipPath.empty(), "GPIO chip path is missing");
-    require(!config.gpioChipExpectedLabel.empty(), "expected GPIO chip label is missing");
-    require(config.adsStart.configured, "ADS START GPIO line offset is missing");
-    require(config.adsDrdy.configured, "ADS DRDY GPIO line offset is missing");
+    const bool anyI2cSensor = config.enableSht45 || config.enableSgp41 ||
+                              config.enableBme690 || config.enableNh3Mcp3421 ||
+                              config.enableH2sMcp3421;
+    if (anyI2cSensor) {
+        require(!config.primaryI2c.path.empty(), "primary I2C adapter path is missing");
+    }
+    if (config.enableAds114s06) {
+        require(!config.adsSpiDevice.empty(), "ADS114S06 SPI device path is missing");
+        require(config.adsSpiMode == 1U, "ADS114S06 SPI mode must be 1");
+        require(config.adsBitsPerWord == 8U, "ADS114S06 SPI bits_per_word must be 8");
+        require(config.adsMaxSpeedHz > 0U, "ADS114S06 SPI max_speed_hz must be nonzero");
+        require(config.adsMaxSpeedHz <= 1000000U, "ADS114S06 provisional SPI clock must not exceed 1 MHz");
+        require(!config.gpioChipPath.empty(), "GPIO chip path is missing");
+        require(!config.gpioChipExpectedLabel.empty(), "expected GPIO chip label is missing");
+        require(config.adsStart.configured, "ADS START GPIO line offset is missing");
+        require(config.adsDrdy.configured, "ADS DRDY GPIO line offset is missing");
+    }
     if (config.adsStart.configured && config.adsDrdy.configured) {
         require(config.adsStart.lineOffset != config.adsDrdy.lineOffset,
                 "ADS START and DRDY GPIO line offsets must differ");
@@ -212,7 +231,7 @@ ValidationResult validateRuntimeConfigValues(const RuntimeConfig& config)
         require(config.adsDrdy.activeLow, "ADS DRDY# must be active low for this machine profile");
     }
 
-    if (config.secondaryI2c.path.empty()) {
+    if (anyI2cSensor && config.secondaryI2c.path.empty()) {
         result.warnings.push_back("secondary I2C adapter path is empty; primary adapter will be shared");
     }
 

@@ -207,6 +207,12 @@ Run independent hardware diagnostics for the configured devices:
 ./build/odor_sensing_app --config config/odor-sensing.rpi5.toml --diagnostic
 ```
 
+When only the ADS114S06/TGS PCB is connected, use the TGS-only profile:
+
+```bash
+./build/odor_sensing_app --config config/odor-sensing.rpi5-tgs-only.toml --diagnostic
+```
+
 Run the normal application loop with hardware enabled after validation passes:
 
 ```bash
@@ -252,6 +258,10 @@ The machine-specific `config/odor-sensing.rpi5.toml` currently selects:
 - GPIO controller `/dev/gpiochip4`, expected label `pinctrl-rp1`
 - ADS START GPIO line `17`, active high
 - ADS DRDY# GPIO line `27`, active low
+
+`config/odor-sensing.rpi5-tgs-only.toml` uses the same ADS/SPI/GPIO settings
+but disables SGP41, BME690, both MCP3421 devices, and SHT45 for the current
+single-PCB ADS/TGS diagnostic setup.
 
 ## Raw CSV Schema
 

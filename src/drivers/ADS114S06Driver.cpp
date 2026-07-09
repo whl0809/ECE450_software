@@ -4,6 +4,8 @@
 #include "protocol/ProtocolUtils.h"
 
 #include <cmath>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace odor {
@@ -15,12 +17,15 @@ constexpr uint8_t AdsCommandStart = 0x08;
 constexpr uint8_t AdsCommandRdata = 0x12;
 constexpr uint8_t AdsCommandRreg = 0x20;
 constexpr uint8_t AdsCommandWreg = 0x40;
+constexpr uint8_t AdsRegisterId = 0x00;
 constexpr uint8_t AdsRegisterInpmux = 0x02;
 constexpr uint8_t AdsRegisterPga = 0x03;
 constexpr uint8_t AdsRegisterDatarate = 0x04;
 constexpr uint8_t AdsRegisterRef = 0x05;
 constexpr uint8_t AdsAincom = 0x0C;
 constexpr uint8_t AdsRequiredSpiMode = 1;
+constexpr uint8_t AdsDeviceIdMask = 0xE0;
+constexpr uint8_t Ads114S06DeviceIdExpected = 0x00;
 
 float adsGainValue(config::Ads114s06PgaGain gain)
 {
@@ -89,7 +94,13 @@ OperationResult ADS114S06Driver::begin()
         return {false, status_.errorFlags};
     }
 
-    OperationResult result = configureRegisters();
+    OperationResult result = readDeviceId();
+    if (!result.ok) {
+        status_ = {true, false, result.errorFlags};
+        return result;
+    }
+
+    result = configureRegisters();
     if (!result.ok) {
         status_ = {true, false, result.errorFlags};
         return result;
@@ -159,7 +170,40 @@ OperationResult ADS114S06Driver::readTgsArray(TgsArrayMeasurement& measurement)
     return {measurement.valid, errors};
 }
 
-OperationResult ADS114S06Driver::writeRegister(uint8_t reg, uint8_t value)
+void ADS114S06Driver::setDiagnosticCallback(ADS114S06DiagnosticCallback callback)
+{
+    diagnosticCallback_ = std::move(callback);
+}
+
+OperationResult ADS114S06Driver::readDeviceId()
+{
+    uint8_t readback = 0;
+    OperationResult result = readRegister(AdsRegisterId, readback, "device_id_read");
+    if (!result.ok) {
+        return result;
+    }
+
+    const uint8_t maskedActual = static_cast<uint8_t>(readback & AdsDeviceIdMask);
+    const uint8_t maskedExpected = static_cast<uint8_t>(Ads114S06DeviceIdExpected & AdsDeviceIdMask);
+    ADS114S06DiagnosticEvent event;
+    event.stage = "device_id_verify";
+    event.registerAddress = AdsRegisterId;
+    event.extractedReadbackValue = readback;
+    event.readbackMask = AdsDeviceIdMask;
+    event.maskedExpected = maskedExpected;
+    event.maskedActual = maskedActual;
+    if (maskedActual != maskedExpected) {
+        event.errorFlags = toErrorFlags(ErrorFlag::DeviceNotDetected) |
+                           toErrorFlags(ErrorFlag::CommunicationFailure);
+        emitDiagnostic(event);
+        return {false, event.errorFlags};
+    }
+
+    emitDiagnostic(event);
+    return {true, 0};
+}
+
+OperationResult ADS114S06Driver::writeRegister(uint8_t reg, uint8_t value, const std::string& stage)
 {
     std::vector<uint8_t> ignored;
     const std::vector<uint8_t> tx = {
@@ -168,13 +212,22 @@ OperationResult ADS114S06Driver::writeRegister(uint8_t reg, uint8_t value)
         value,
     };
     const hardware::HardwareResult result = spiDevice_.transfer(tx, ignored);
+    ADS114S06DiagnosticEvent event;
+    event.stage = stage + "_wreg";
+    event.registerAddress = reg;
+    event.txBytes = tx;
+    event.rxBytes = ignored;
+    event.requestedWriteValue = value;
     if (!result.ok) {
+        event.errorFlags = spiError().errorFlags;
+        emitDiagnostic(event);
         return spiError();
     }
+    emitDiagnostic(event);
     return {true, 0};
 }
 
-OperationResult ADS114S06Driver::readRegister(uint8_t reg, uint8_t& value)
+OperationResult ADS114S06Driver::readRegister(uint8_t reg, uint8_t& value, const std::string& stage)
 {
     std::vector<uint8_t> rx;
     const std::vector<uint8_t> tx = {
@@ -183,32 +236,69 @@ OperationResult ADS114S06Driver::readRegister(uint8_t reg, uint8_t& value)
         0x00,
     };
     const hardware::HardwareResult result = spiDevice_.transfer(tx, rx);
+    ADS114S06DiagnosticEvent event;
+    event.stage = stage + "_rreg";
+    event.registerAddress = reg;
+    event.txBytes = tx;
+    event.rxBytes = rx;
     if (!result.ok) {
+        event.errorFlags = spiError().errorFlags;
+        emitDiagnostic(event);
         return spiError();
     }
     if (rx.empty()) {
-        return {false, toErrorFlags(ErrorFlag::InvalidMeasurement)};
+        event.errorFlags = toErrorFlags(ErrorFlag::InvalidMeasurement);
+        emitDiagnostic(event);
+        return {false, event.errorFlags};
     }
     value = rx.back();
+    event.extractedReadbackValue = value;
+    emitDiagnostic(event);
     return {true, 0};
 }
 
 OperationResult ADS114S06Driver::writeRegisterChecked(uint8_t reg, uint8_t value)
 {
-    OperationResult result = writeRegister(reg, value);
+    OperationResult result = writeRegister(reg, value, "register_0x" + std::to_string(reg));
     if (!result.ok || !config_.runtime.verifyRegisterReadback) {
         return result;
     }
 
+    return verifyMaskedRegister(reg,
+                                value,
+                                verificationMaskFor(reg),
+                                "register_0x" + std::to_string(reg));
+}
+
+OperationResult ADS114S06Driver::verifyMaskedRegister(uint8_t reg,
+                                                      uint8_t requestedValue,
+                                                      uint8_t readbackMask,
+                                                      const std::string& stage)
+{
     uint8_t readback = 0;
-    result = readRegister(reg, readback);
+    OperationResult result = readRegister(reg, readback, stage + "_verify");
     if (!result.ok) {
         return result;
     }
-    if (readback != value) {
-        return {false, toErrorFlags(ErrorFlag::InvalidConfiguration) |
-                           toErrorFlags(ErrorFlag::CommunicationFailure)};
+
+    const uint8_t maskedExpected = static_cast<uint8_t>(requestedValue & readbackMask);
+    const uint8_t maskedActual = static_cast<uint8_t>(readback & readbackMask);
+    ADS114S06DiagnosticEvent event;
+    event.stage = stage + "_masked_compare";
+    event.registerAddress = reg;
+    event.requestedWriteValue = requestedValue;
+    event.extractedReadbackValue = readback;
+    event.readbackMask = readbackMask;
+    event.maskedExpected = maskedExpected;
+    event.maskedActual = maskedActual;
+    if (maskedActual != maskedExpected) {
+        event.errorFlags = toErrorFlags(ErrorFlag::InvalidConfiguration) |
+                           toErrorFlags(ErrorFlag::CommunicationFailure);
+        emitDiagnostic(event);
+        return {false, event.errorFlags};
     }
+
+    emitDiagnostic(event);
     return {true, 0};
 }
 
@@ -242,6 +332,12 @@ OperationResult ADS114S06Driver::startConversion()
     std::vector<uint8_t> ignored;
     const hardware::HardwareResult result = spiDevice_.transfer({AdsCommandStart}, ignored);
     if (!result.ok) {
+        ADS114S06DiagnosticEvent event;
+        event.stage = "start_conversion";
+        event.txBytes = {AdsCommandStart};
+        event.rxBytes = ignored;
+        event.errorFlags = spiError().errorFlags;
+        emitDiagnostic(event);
         return spiError();
     }
     return {true, 0};
@@ -258,7 +354,11 @@ OperationResult ADS114S06Driver::waitForReady()
     const hardware::HardwareResult result =
         drdyLine_->waitForEdge(hardware::GpioEdge::Falling, config_.runtime.conversionTimeout);
     if (!result.ok) {
-        return {false, toErrorFlags(ErrorFlag::Timeout) | toErrorFlags(ErrorFlag::NotReady)};
+        ADS114S06DiagnosticEvent event;
+        event.stage = "wait_for_drdy";
+        event.errorFlags = toErrorFlags(ErrorFlag::Timeout) | toErrorFlags(ErrorFlag::NotReady);
+        emitDiagnostic(event);
+        return {false, event.errorFlags};
     }
     return {true, 0};
 }
@@ -267,15 +367,24 @@ OperationResult ADS114S06Driver::readSample(int32_t& rawCode)
 {
     std::vector<uint8_t> rx;
     const hardware::HardwareResult result = spiDevice_.transfer({AdsCommandRdata, 0x00, 0x00}, rx);
+    ADS114S06DiagnosticEvent event;
+    event.stage = "read_sample_rdata";
+    event.txBytes = {AdsCommandRdata, 0x00, 0x00};
+    event.rxBytes = rx;
     if (!result.ok) {
+        event.errorFlags = spiError().errorFlags;
+        emitDiagnostic(event);
         return spiError();
     }
     if (rx.size() < 2U) {
-        return {false, toErrorFlags(ErrorFlag::InvalidMeasurement)};
+        event.errorFlags = toErrorFlags(ErrorFlag::InvalidMeasurement);
+        emitDiagnostic(event);
+        return {false, event.errorFlags};
     }
 
     const size_t offset = rx.size() - 2U;
     rawCode = protocol::readSignedBe(rx, offset, 2);
+    emitDiagnostic(event);
     return {true, 0};
 }
 
@@ -288,6 +397,26 @@ uint8_t ADS114S06Driver::dataRateRegisterValue() const
 {
     return static_cast<uint8_t>((config_.runtime.filterCode & 0xE0U) |
                                 (config_.runtime.dataRateCode & 0x1FU));
+}
+
+uint8_t ADS114S06Driver::verificationMaskFor(uint8_t reg) const
+{
+    switch (reg) {
+    case AdsRegisterInpmux:
+    case AdsRegisterPga:
+    case AdsRegisterDatarate:
+    case AdsRegisterRef:
+        return 0xFF;
+    default:
+        return 0xFF;
+    }
+}
+
+void ADS114S06Driver::emitDiagnostic(ADS114S06DiagnosticEvent event) const
+{
+    if (diagnosticCallback_) {
+        diagnosticCallback_(event);
+    }
 }
 
 }  // namespace odor

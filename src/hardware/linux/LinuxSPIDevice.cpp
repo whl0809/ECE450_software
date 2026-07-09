@@ -47,6 +47,12 @@ HardwareResult LinuxSPIDevice::open()
         close();
         return failed;
     }
+    actualMode_ = config_.mode;
+    actualBitsPerWord_ = config_.bitsPerWord;
+    actualMaxSpeedHz_ = config_.maxSpeedHz;
+    (void)::ioctl(fd_, SPI_IOC_RD_MODE, &actualMode_);
+    (void)::ioctl(fd_, SPI_IOC_RD_BITS_PER_WORD, &actualBitsPerWord_);
+    (void)::ioctl(fd_, SPI_IOC_RD_MAX_SPEED_HZ, &actualMaxSpeedHz_);
 
     return HardwareResult::success();
 }
@@ -67,6 +73,21 @@ bool LinuxSPIDevice::isConfigured() const
 std::string LinuxSPIDevice::description() const
 {
     return config_.devicePath.empty() ? "unconfigured-linux-spi" : config_.devicePath;
+}
+
+uint8_t LinuxSPIDevice::actualMode() const
+{
+    return actualMode_;
+}
+
+uint8_t LinuxSPIDevice::actualBitsPerWord() const
+{
+    return actualBitsPerWord_;
+}
+
+uint32_t LinuxSPIDevice::actualMaxSpeedHz() const
+{
+    return actualMaxSpeedHz_;
 }
 
 HardwareResult LinuxSPIDevice::transfer(const std::vector<uint8_t>& txBytes,

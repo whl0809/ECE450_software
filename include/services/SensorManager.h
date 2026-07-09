@@ -18,6 +18,12 @@ struct SensorManagerRuntimeProfile {
     bool i2cBusAssignmentsConfirmed = false;
     bool adsSpiConfigured = false;
     bool adsDrdyConfigured = false;
+    bool enableTgsArray = config::EnableTgsArray;
+    bool enableNh3Sensor = config::EnableNh3Sensor;
+    bool enableH2sSensor = config::EnableH2sSensor;
+    bool enableSgp41 = config::EnableSgp41;
+    bool enableBme690 = config::EnableBme690;
+    bool enableSht45 = config::EnableSht45;
     config::Ads114s06RuntimeSettings adsRuntime = config::Ads114s06Defaults;
 };
 

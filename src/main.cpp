@@ -2,10 +2,13 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "app/RuntimeConfig.h"
 #include "config.h"
@@ -95,6 +98,40 @@ void printDiagnosticResult(const std::string& name, const odor::OperationResult&
               << ",error_flags=" << result.errorFlags << '\n';
 }
 
+std::string bytesToHex(const std::vector<uint8_t>& bytes)
+{
+    std::ostringstream out;
+    out << '[';
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        if (i != 0U) {
+            out << ' ';
+        }
+        out << "0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+            << static_cast<int>(bytes[i]);
+    }
+    out << ']';
+    return out.str();
+}
+
+void printAdsDiagnosticEvent(const odor::ADS114S06DiagnosticEvent& event)
+{
+    std::cout << "ads_diag"
+              << ",stage=" << event.stage
+              << ",reg=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+              << static_cast<int>(event.registerAddress)
+              << std::dec
+              << ",tx=" << bytesToHex(event.txBytes)
+              << ",rx=" << bytesToHex(event.rxBytes)
+              << ",requested=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+              << static_cast<int>(event.requestedWriteValue)
+              << ",readback=0x" << std::setw(2) << static_cast<int>(event.extractedReadbackValue)
+              << ",mask=0x" << std::setw(2) << static_cast<int>(event.readbackMask)
+              << ",masked_expected=0x" << std::setw(2) << static_cast<int>(event.maskedExpected)
+              << ",masked_actual=0x" << std::setw(2) << static_cast<int>(event.maskedActual)
+              << std::dec
+              << ",error_flags=" << event.errorFlags << '\n';
+}
+
 int runMockApplication()
 {
     odor::hardware::mock::MockI2CBus primaryI2c(false, "unconfigured-primary-i2c");
@@ -166,50 +203,73 @@ int runHardwareDiagnostic(odor::hardware::II2CBus& primaryI2c,
         }
     };
 
-    record("sht45_begin", sht45.begin());
     odor::Sht45Measurement sht45Measurement;
-    record("sht45_read", sht45.readMeasurement(sht45Measurement));
-
-    record("sgp41_begin", sgp41.begin());
-    if (sht45Measurement.valid) {
-        sgp41.setCompensation(sht45Measurement.temperatureC,
-                              sht45Measurement.humidityRh,
-                              sht45Measurement.monotonicTimestamp);
+    if (config.enableSht45) {
+        record("sht45_begin", sht45.begin());
+        record("sht45_read", sht45.readMeasurement(sht45Measurement));
     }
-    odor::Sgp41Measurement sgp41Measurement;
-    record("sgp41_read_raw", sgp41.readRawSignals(sgp41Measurement));
 
-    record("bme690_begin", bme690.begin());
-    odor::Bme690Measurement bme690Measurement;
-    record("bme690_read", bme690.readMeasurement(bme690Measurement));
+    if (config.enableSgp41) {
+        record("sgp41_begin", sgp41.begin());
+        if (sht45Measurement.valid) {
+            sgp41.setCompensation(sht45Measurement.temperatureC,
+                                  sht45Measurement.humidityRh,
+                                  sht45Measurement.monotonicTimestamp);
+        }
+        odor::Sgp41Measurement sgp41Measurement;
+        record("sgp41_read_raw", sgp41.readRawSignals(sgp41Measurement));
+    }
 
-    record("nh3_mcp3421_begin", nh3.begin());
-    odor::ElectrochemicalMeasurement nh3Measurement;
-    record("nh3_mcp3421_read", nh3.readElectrochemical(nh3Measurement));
+    if (config.enableBme690) {
+        record("bme690_begin", bme690.begin());
+        odor::Bme690Measurement bme690Measurement;
+        record("bme690_read", bme690.readMeasurement(bme690Measurement));
+    }
 
-    record("h2s_mcp3421_begin", h2s.begin());
-    odor::ElectrochemicalMeasurement h2sMeasurement;
-    record("h2s_mcp3421_read", h2s.readElectrochemical(h2sMeasurement));
+    if (config.enableNh3Mcp3421) {
+        record("nh3_mcp3421_begin", nh3.begin());
+        odor::ElectrochemicalMeasurement nh3Measurement;
+        record("nh3_mcp3421_read", nh3.readElectrochemical(nh3Measurement));
+    }
 
-    record("ads114s06_begin", ads.begin());
-    odor::TgsArrayMeasurement tgsMeasurement;
-    record("ads114s06_read_tgs_array", ads.readTgsArray(tgsMeasurement));
+    if (config.enableH2sMcp3421) {
+        record("h2s_mcp3421_begin", h2s.begin());
+        odor::ElectrochemicalMeasurement h2sMeasurement;
+        record("h2s_mcp3421_read", h2s.readElectrochemical(h2sMeasurement));
+    }
+
+    if (config.enableAds114s06) {
+        ads.setDiagnosticCallback(printAdsDiagnosticEvent);
+        record("ads114s06_begin", ads.begin());
+        odor::TgsArrayMeasurement tgsMeasurement;
+        record("ads114s06_read_tgs_array", ads.readTgsArray(tgsMeasurement));
+    }
 
     return failures == 0 ? 0 : 2;
 }
 
 int runLinuxApplication(const odor::app::RuntimeConfig& config, bool diagnostic)
 {
-    odor::hardware::linux::LinuxI2CBus primaryI2c(config.primaryI2c.path);
-    const odor::hardware::HardwareResult primaryOpen = primaryI2c.open();
-    if (!primaryOpen.ok) {
-        std::cerr << "error: " << primaryOpen.message << '\n';
-        return 1;
+    const bool anyI2cSensor = config.enableSht45 || config.enableSgp41 ||
+                              config.enableBme690 || config.enableNh3Mcp3421 ||
+                              config.enableH2sMcp3421;
+
+    odor::hardware::mock::MockI2CBus disabledI2c(false, "disabled-i2c");
+    std::unique_ptr<odor::hardware::linux::LinuxI2CBus> primaryI2c;
+    odor::hardware::II2CBus* primaryBus = &disabledI2c;
+    if (anyI2cSensor) {
+        primaryI2c = std::make_unique<odor::hardware::linux::LinuxI2CBus>(config.primaryI2c.path);
+        const odor::hardware::HardwareResult primaryOpen = primaryI2c->open();
+        if (!primaryOpen.ok) {
+            std::cerr << "error: " << primaryOpen.message << '\n';
+            return 1;
+        }
+        primaryBus = primaryI2c.get();
     }
 
     std::unique_ptr<odor::hardware::linux::LinuxI2CBus> secondaryI2c;
-    odor::hardware::II2CBus* h2sBus = &primaryI2c;
-    if (!config.secondaryI2c.path.empty() && config.secondaryI2c.path != config.primaryI2c.path) {
+    odor::hardware::II2CBus* h2sBus = primaryBus;
+    if (anyI2cSensor && !config.secondaryI2c.path.empty() && config.secondaryI2c.path != config.primaryI2c.path) {
         secondaryI2c = std::make_unique<odor::hardware::linux::LinuxI2CBus>(config.secondaryI2c.path);
         const odor::hardware::HardwareResult secondaryOpen = secondaryI2c->open();
         if (!secondaryOpen.ok) {
@@ -219,59 +279,80 @@ int runLinuxApplication(const odor::app::RuntimeConfig& config, bool diagnostic)
         h2sBus = secondaryI2c.get();
     }
 
-    odor::hardware::linux::LinuxSPIDevice adsSpi({
-        config.adsSpiDevice,
-        config.adsSpiMode,
-        config.adsBitsPerWord,
-        config.adsMaxSpeedHz,
-    });
-    const odor::hardware::HardwareResult spiOpen = adsSpi.open();
-    if (!spiOpen.ok) {
-        std::cerr << "error: " << spiOpen.message << '\n';
-        return 1;
-    }
+    odor::hardware::mock::MockSPIDevice disabledSpi(false, "disabled-spi");
+    std::unique_ptr<odor::hardware::linux::LinuxSPIDevice> adsSpi;
+    odor::hardware::ISPIDevice* adsSpiDevice = &disabledSpi;
+    odor::hardware::mock::MockGpioLine disabledDrdy(false, "disabled-drdy");
+    odor::hardware::IGpioLine* adsDrdyLine = &disabledDrdy;
+    std::unique_ptr<odor::hardware::linux::LinuxGpioLine> adsStart;
+    std::unique_ptr<odor::hardware::linux::LinuxGpioLine> adsDrdy;
 
-    odor::hardware::linux::LinuxGpioLine adsStart({
-        config.gpioChipPath,
-        config.adsStart.lineOffset,
-        "odor-sensing-ads-start",
-        odor::hardware::linux::GpioDirection::Output,
-        odor::hardware::GpioEdge::None,
-        config.adsStart.activeLow,
-        false,
-    });
-    const odor::hardware::HardwareResult startRequest = adsStart.request();
-    if (!startRequest.ok) {
-        std::cerr << "error: " << startRequest.message << '\n';
-        return 1;
-    }
+    if (config.enableAds114s06) {
+        adsSpi = std::make_unique<odor::hardware::linux::LinuxSPIDevice>(odor::hardware::linux::LinuxSPIConfig{
+            config.adsSpiDevice,
+            config.adsSpiMode,
+            config.adsBitsPerWord,
+            config.adsMaxSpeedHz,
+        });
+        const odor::hardware::HardwareResult spiOpen = adsSpi->open();
+        if (!spiOpen.ok) {
+            std::cerr << "error: " << spiOpen.message << '\n';
+            return 1;
+        }
+        adsSpiDevice = adsSpi.get();
+        std::cout << "spi_actual,mode=" << static_cast<int>(adsSpi->actualMode())
+                  << ",bits_per_word=" << static_cast<int>(adsSpi->actualBitsPerWord())
+                  << ",max_speed_hz=" << adsSpi->actualMaxSpeedHz() << '\n';
 
-    odor::hardware::linux::LinuxGpioLine adsDrdy({
-        config.gpioChipPath,
-        config.adsDrdy.lineOffset,
-        "odor-sensing-ads-drdy",
-        odor::hardware::linux::GpioDirection::Input,
-        odor::hardware::GpioEdge::Falling,
-        config.adsDrdy.activeLow,
-        false,
-    });
-    const odor::hardware::HardwareResult drdyRequest = adsDrdy.request();
-    if (!drdyRequest.ok) {
-        std::cerr << "error: " << drdyRequest.message << '\n';
-        return 1;
-    }
+        adsStart = std::make_unique<odor::hardware::linux::LinuxGpioLine>(odor::hardware::linux::LinuxGpioConfig{
+            config.gpioChipPath,
+            config.adsStart.lineOffset,
+            "odor-sensing-ads-start",
+            odor::hardware::linux::GpioDirection::Output,
+            odor::hardware::GpioEdge::None,
+            config.adsStart.activeLow,
+            false,
+        });
+        const odor::hardware::HardwareResult startRequest = adsStart->request();
+        if (!startRequest.ok) {
+            std::cerr << "error: " << startRequest.message << '\n';
+            return 1;
+        }
 
-    if (diagnostic) {
-        return runHardwareDiagnostic(primaryI2c, *h2sBus, adsSpi, adsDrdy, config);
+        adsDrdy = std::make_unique<odor::hardware::linux::LinuxGpioLine>(odor::hardware::linux::LinuxGpioConfig{
+            config.gpioChipPath,
+            config.adsDrdy.lineOffset,
+            "odor-sensing-ads-drdy",
+            odor::hardware::linux::GpioDirection::Input,
+            odor::hardware::GpioEdge::Falling,
+            config.adsDrdy.activeLow,
+            false,
+        });
+        const odor::hardware::HardwareResult drdyRequest = adsDrdy->request();
+        if (!drdyRequest.ok) {
+            std::cerr << "error: " << drdyRequest.message << '\n';
+            return 1;
+        }
+        adsDrdyLine = adsDrdy.get();
+
+        if (diagnostic) {
+            return runHardwareDiagnostic(*primaryBus, *h2sBus, *adsSpiDevice, *adsDrdyLine, config);
+        }
     }
 
     odor::SensorManagerRuntimeProfile profile;
     profile.i2cBusAssignmentsConfirmed = true;
-    profile.adsSpiConfigured = true;
+    profile.adsSpiConfigured = config.enableAds114s06;
     profile.adsDrdyConfigured = config.adsDrdy.configured;
+    profile.enableTgsArray = config.enableAds114s06;
+    profile.enableNh3Sensor = config.enableNh3Mcp3421;
+    profile.enableH2sSensor = config.enableH2sMcp3421;
+    profile.enableSgp41 = config.enableSgp41;
+    profile.enableBme690 = config.enableBme690;
+    profile.enableSht45 = config.enableSht45;
     profile.adsRuntime = adsRuntimeFrom(config);
 
-    odor::SensorManager sensorManager(primaryI2c, *h2sBus, adsSpi, &adsDrdy, profile);
+    odor::SensorManager sensorManager(*primaryBus, *h2sBus, *adsSpiDevice, adsDrdyLine, profile);
     const odor::OperationResult beginResult = sensorManager.begin();
     std::cout << "Hardware access: enabled from runtime configuration\n";
     std::cout << "SensorManager initialization: " << initializationStatusText(beginResult) << '\n';

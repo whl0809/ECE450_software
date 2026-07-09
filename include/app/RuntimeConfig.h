@@ -22,6 +22,13 @@ struct RuntimeConfig {
     I2cAdapter primaryI2c;
     I2cAdapter secondaryI2c;
 
+    bool enableSht45 = true;
+    bool enableSgp41 = true;
+    bool enableBme690 = true;
+    bool enableNh3Mcp3421 = true;
+    bool enableH2sMcp3421 = true;
+    bool enableAds114s06 = true;
+
     std::string adsSpiDevice;
     uint8_t adsSpiMode = 1;
     uint8_t adsBitsPerWord = 8;

@@ -6,6 +6,8 @@
 #include "sensor_types.h"
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 namespace odor {
@@ -20,6 +22,21 @@ struct ADS114S06Config {
     config::Ads114s06RuntimeSettings runtime{};
 };
 
+struct ADS114S06DiagnosticEvent {
+    std::string stage;
+    uint8_t registerAddress = 0;
+    std::vector<uint8_t> txBytes;
+    std::vector<uint8_t> rxBytes;
+    uint8_t requestedWriteValue = 0;
+    uint8_t extractedReadbackValue = 0;
+    uint8_t readbackMask = 0xFF;
+    uint8_t maskedExpected = 0;
+    uint8_t maskedActual = 0;
+    ErrorFlags errorFlags = 0;
+};
+
+using ADS114S06DiagnosticCallback = std::function<void(const ADS114S06DiagnosticEvent&)>;
+
 class ADS114S06Driver {
 public:
     ADS114S06Driver(hardware::ISPIDevice& spiDevice, const ADS114S06Config& config);
@@ -30,11 +47,17 @@ public:
     OperationResult begin();
     DriverStatus status() const;
     OperationResult readTgsArray(TgsArrayMeasurement& measurement);
+    void setDiagnosticCallback(ADS114S06DiagnosticCallback callback);
 
 private:
-    OperationResult writeRegister(uint8_t reg, uint8_t value);
-    OperationResult readRegister(uint8_t reg, uint8_t& value);
+    OperationResult readDeviceId();
+    OperationResult writeRegister(uint8_t reg, uint8_t value, const std::string& stage);
+    OperationResult readRegister(uint8_t reg, uint8_t& value, const std::string& stage);
     OperationResult writeRegisterChecked(uint8_t reg, uint8_t value);
+    OperationResult verifyMaskedRegister(uint8_t reg,
+                                         uint8_t requestedValue,
+                                         uint8_t readbackMask,
+                                         const std::string& stage);
     OperationResult configureRegisters();
     OperationResult selectChannel(uint8_t ain);
     OperationResult startConversion();
@@ -42,11 +65,14 @@ private:
     OperationResult readSample(int32_t& rawCode);
     uint8_t pgaRegisterValue() const;
     uint8_t dataRateRegisterValue() const;
+    uint8_t verificationMaskFor(uint8_t reg) const;
+    void emitDiagnostic(ADS114S06DiagnosticEvent event) const;
 
     hardware::ISPIDevice& spiDevice_;
     hardware::IGpioLine* drdyLine_ = nullptr;
     ADS114S06Config config_;
     DriverStatus status_;
+    ADS114S06DiagnosticCallback diagnosticCallback_;
 };
 
 }  // namespace odor
