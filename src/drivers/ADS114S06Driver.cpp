@@ -3,8 +3,10 @@
 #include "error_flags.h"
 #include "protocol/ProtocolUtils.h"
 
+#include <chrono>
 #include <cmath>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -13,6 +15,7 @@ namespace odor {
 namespace {
 
 // TI ADS114S06 command and register names from the ADS114S06 datasheet.
+constexpr uint8_t AdsCommandReset = 0x06;
 constexpr uint8_t AdsCommandStart = 0x08;
 constexpr uint8_t AdsCommandRdata = 0x12;
 constexpr uint8_t AdsCommandRreg = 0x20;
@@ -173,6 +176,76 @@ OperationResult ADS114S06Driver::readTgsArray(TgsArrayMeasurement& measurement)
 void ADS114S06Driver::setDiagnosticCallback(ADS114S06DiagnosticCallback callback)
 {
     diagnosticCallback_ = std::move(callback);
+}
+
+OperationResult ADS114S06Driver::runResetRegisterSnapshotDiagnostic()
+{
+    if (!config_.spiDeviceConfigured || !spiDevice_.isConfigured()) {
+        return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
+    }
+
+    std::vector<uint8_t> resetRx;
+    const std::vector<uint8_t> resetTx = {AdsCommandReset};
+    hardware::HardwareResult transferResult = spiDevice_.transfer(resetTx, resetRx);
+    ADS114S06DiagnosticEvent resetEvent;
+    resetEvent.stage = "reset_command";
+    resetEvent.txBytes = resetTx;
+    resetEvent.rxBytes = resetRx;
+    if (!transferResult.ok) {
+        resetEvent.errorFlags = spiError().errorFlags;
+        emitDiagnostic(resetEvent);
+        return spiError();
+    }
+    emitDiagnostic(resetEvent);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+    std::vector<uint8_t> snapshotRx;
+    const std::vector<uint8_t> snapshotTx = {
+        static_cast<uint8_t>(AdsCommandRreg | AdsRegisterId),
+        0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    };
+    transferResult = spiDevice_.transfer(snapshotTx, snapshotRx);
+
+    ADS114S06DiagnosticEvent snapshotEvent;
+    snapshotEvent.stage = "reset_register_snapshot_rreg";
+    snapshotEvent.registerAddress = AdsRegisterId;
+    snapshotEvent.txBytes = snapshotTx;
+    snapshotEvent.rxBytes = snapshotRx;
+    if (!transferResult.ok) {
+        snapshotEvent.errorFlags = spiError().errorFlags;
+        emitDiagnostic(snapshotEvent);
+        return spiError();
+    }
+    if (snapshotRx.size() < 4U) {
+        snapshotEvent.errorFlags = toErrorFlags(ErrorFlag::InvalidMeasurement);
+        emitDiagnostic(snapshotEvent);
+        return {false, snapshotEvent.errorFlags};
+    }
+
+    const size_t registerOffset = snapshotRx.size() - 4U;
+    snapshotEvent.extractedRegisterBytes.assign(snapshotRx.begin() + static_cast<std::vector<uint8_t>::difference_type>(registerOffset),
+                                                snapshotRx.end());
+    const uint8_t idRegister = snapshotEvent.extractedRegisterBytes[0];
+    snapshotEvent.hasComparison = true;
+    snapshotEvent.requestedWriteValue = Ads114S06DeviceIdExpected;
+    snapshotEvent.extractedReadbackValue = idRegister;
+    snapshotEvent.readbackMask = AdsDeviceIdMask;
+    snapshotEvent.maskedExpected = static_cast<uint8_t>(Ads114S06DeviceIdExpected & AdsDeviceIdMask);
+    snapshotEvent.maskedActual = static_cast<uint8_t>(idRegister & AdsDeviceIdMask);
+    if (snapshotEvent.maskedActual != snapshotEvent.maskedExpected) {
+        snapshotEvent.errorFlags = toErrorFlags(ErrorFlag::DeviceNotDetected) |
+                                   toErrorFlags(ErrorFlag::CommunicationFailure);
+        emitDiagnostic(snapshotEvent);
+        return {false, snapshotEvent.errorFlags};
+    }
+
+    emitDiagnostic(snapshotEvent);
+    return {true, 0};
 }
 
 OperationResult ADS114S06Driver::readDeviceId()

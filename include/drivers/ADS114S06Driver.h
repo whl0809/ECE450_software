@@ -27,6 +27,7 @@ struct ADS114S06DiagnosticEvent {
     uint8_t registerAddress = 0;
     std::vector<uint8_t> txBytes;
     std::vector<uint8_t> rxBytes;
+    std::vector<uint8_t> extractedRegisterBytes;
     bool hasComparison = false;
     uint8_t requestedWriteValue = 0;
     uint8_t extractedReadbackValue = 0;
@@ -48,6 +49,7 @@ public:
     OperationResult begin();
     DriverStatus status() const;
     OperationResult readTgsArray(TgsArrayMeasurement& measurement);
+    OperationResult runResetRegisterSnapshotDiagnostic();
     void setDiagnosticCallback(ADS114S06DiagnosticCallback callback);
 
 private:

@@ -122,6 +122,24 @@ void printAdsDiagnosticEvent(const odor::ADS114S06DiagnosticEvent& event)
               << std::dec
               << ",tx=" << bytesToHex(event.txBytes)
               << ",rx=" << bytesToHex(event.rxBytes);
+    if (!event.extractedRegisterBytes.empty()) {
+        std::cout << ",registers_0x00_0x03=" << bytesToHex(event.extractedRegisterBytes);
+        if (event.extractedRegisterBytes.size() >= 4U) {
+            const uint8_t status = event.extractedRegisterBytes[1];
+            const uint8_t inpmux = event.extractedRegisterBytes[2];
+            const uint8_t pga = event.extractedRegisterBytes[3];
+            std::cout << ",status_expected=0x80,status_actual=0x" << std::hex << std::uppercase
+                      << std::setw(2) << std::setfill('0') << static_cast<int>(status)
+                      << ",status_matches=" << (status == 0x80U ? "true" : "false")
+                      << ",inpmux_expected=0x01,inpmux_actual=0x" << std::setw(2)
+                      << static_cast<int>(inpmux)
+                      << ",inpmux_matches=" << (inpmux == 0x01U ? "true" : "false")
+                      << ",pga_expected=0x00,pga_actual=0x" << std::setw(2)
+                      << static_cast<int>(pga)
+                      << ",pga_matches=" << (pga == 0x00U ? "true" : "false")
+                      << std::dec;
+        }
+    }
     if (event.hasComparison) {
         std::cout << ",requested=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
                   << static_cast<int>(event.requestedWriteValue)
@@ -242,6 +260,7 @@ int runHardwareDiagnostic(odor::hardware::II2CBus& primaryI2c,
 
     if (config.enableAds114s06) {
         ads.setDiagnosticCallback(printAdsDiagnosticEvent);
+        record("ads114s06_reset_register_snapshot", ads.runResetRegisterSnapshotDiagnostic());
         record("ads114s06_begin", ads.begin());
         odor::TgsArrayMeasurement tgsMeasurement;
         record("ads114s06_read_tgs_array", ads.readTgsArray(tgsMeasurement));
