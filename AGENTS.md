@@ -29,15 +29,17 @@ This does **not** mean the system is hardware-verified.
 
 ### Current development phase
 
-The next phase is Raspberry Pi and physical-board integration:
+This specific Raspberry Pi 5 has now been inspected. The initial Linux device paths, GPIO controller, and Pi-to-board signal assignments are selected and may be used in a machine-specific runtime configuration.
 
-1. Build and test natively on Raspberry Pi 5.
-2. Finalize and document Pi physical-pin, BCM GPIO, `gpiochip`, and line-offset mappings.
-3. Confirm `/dev/i2c-*` and `/dev/spidev*` paths and permissions.
-4. Connect the two boards safely.
-5. Validate each sensor and ADC on real hardware.
-6. Tune provisional ADC and timing parameters from measurements.
-7. Run stable multi-sensor CSV acquisition tests.
+The next phase is native build and physical-board validation:
+
+1. Add or update the machine-specific runtime configuration with the selected paths and GPIO mappings in Section 3.
+2. Build and run mock tests natively on Raspberry Pi 5.
+3. Connect both boards using the documented wiring.
+4. Confirm the five expected I2C addresses on `/dev/i2c-1`.
+5. Validate ADS114S06 SPI, START, DRDY#, register readback, and six-channel acquisition.
+6. Tune provisional ADC and timing parameters from real measurements.
+7. Run stable multi-sensor CSV acquisition and fault tests.
 
 Do not redesign completed drivers or schemas unless a verified hardware result, official documentation, or demonstrated defect requires it.
 
@@ -66,7 +68,7 @@ CSB -> VDD3V3
 SDO -> DGND
 ```
 
-Board 1 and the Board 2 SHT45 provisionally share one configurable Raspberry Pi I2C adapter. The architecture must still permit per-board or per-device adapter overrides. This is a software assumption, not yet a hardware-validated wiring result.
+For this Raspberry Pi integration, Board 1 and the Board 2 SHT45 are assigned to the standard header I2C bus at `/dev/i2c-1`, using BCM GPIO2 for SDA and BCM GPIO3 for SCL. The architecture must still permit per-board or per-device adapter overrides. The selected bus and wiring remain subject to connected-board validation.
 
 ### Mixed TGS array through ADS114S06
 
@@ -176,9 +178,49 @@ All three       -> common ground
 
 Do not parallel Raspberry Pi 3.3 V or 5 V with either board's regulated rail. Before joining I2C domains, validate common ground, 3.3 V logic, effective pull-up resistance, and back-powering behavior when a board is off.
 
+
 ---
 
-## 3. Safety and Information That Must Not Be Invented
+## 3. Selected Raspberry Pi Integration Profile
+
+The following values were observed or selected for the current Raspberry Pi 5 Model B Rev 1.1 running 64-bit Debian 12. Store them in a machine-specific runtime configuration. Do not bury them inside low-level drivers.
+
+### Linux resources
+
+```text
+shared I2C adapter -> /dev/i2c-1
+ADS SPI device     -> /dev/spidev0.0
+SPI mode           -> mode 1
+SPI clock          -> 1 MHz provisional
+GPIO controller    -> /dev/gpiochip4
+expected GPIO label-> pinctrl-rp1
+START line offset  -> 17, active high
+DRDY# line offset  -> 27, active low
+```
+
+The current user is already a member of the `i2c`, `spi`, and `gpio` groups. Do not modify user groups unless a later permission check demonstrates a problem.
+
+### Physical-header and BCM assignments
+
+| Function | Physical pin | BCM GPIO | Board connection |
+|---|---:|---:|---|
+| Shared I2C SDA | 3 | GPIO2 | Board 1 CN1 pin 3 and Board 2 SHT45 pad 1 |
+| Shared I2C SCL | 5 | GPIO3 | Board 1 CN1 pin 1 and Board 2 SHT45 pad 2 |
+| Shared I2C ground | 6 | GND | Board 1 CN1 pin 2 or 4 and Board 2 SHT45 pad 4 |
+| ADS MOSI | 19 | GPIO10 | Board 2 CN1 pin 2, DIN |
+| ADS MISO | 21 | GPIO9 | Board 2 CN1 pin 4, DOUT |
+| ADS SCLK | 23 | GPIO11 | Board 2 CN1 pin 3, SCLK |
+| ADS START | 11 | GPIO17 | Board 2 CN1 pin 1, START |
+| ADS DRDY# | 13 | GPIO27 | Board 2 CN1 pin 5, DRDY# |
+| ADS ground | 20 | GND | Board 2 CN1 pin 6, AGND |
+
+Raspberry Pi CE0 at physical pin 24 is not connected to the board. `/dev/spidev0.0` may still toggle CE0 internally, but the ADS114S06 `CS#` is permanently tied low on Board 2.
+
+These assignments finalize the initial software integration configuration. They are not yet proof of electrical or protocol correctness; connected-board tests must still verify bus visibility, pinmux, signal behavior, and stable acquisition.
+
+---
+
+## 4. Safety and Information That Must Not Be Invented
 
 Raspberry Pi GPIO uses 3.3 V logic. Never drive a 5 V signal into a Pi GPIO. Do not power sensors, heaters, pumps, valves, displays, or blowers directly from a GPIO.
 
@@ -192,20 +234,17 @@ GPIO line offset
 Application signal name
 ```
 
+The machine-specific paths and mappings in Section 3 are selected for this Pi and may be used. Do not silently change them, substitute different buses or pins, or describe them as hardware-verified without new evidence.
+
 Never silently guess:
 
-- Raspberry Pi physical-header pin assignments
-- BCM GPIO assignments
-- `/dev/gpiochip*` path or GPIO line offsets
-- `/dev/i2c-*` adapter path
-- `/dev/spidev*` device path
-- START or DRDY# GPIO mapping and active-edge behavior
-- final ADS114S06 clock, PGA, data rate, filter, settling, or sequencing
+- final ADS114S06 clock, PGA, data rate, digital filter, channel settling, or conversion sequence
+- final START behavior or measured DRDY# edge/timing behavior
 - final MCP3421 gain, resolution, or conversion mode
 - electrochemical polarity, zero offset, calibrated sensitivity, or ppm conversion
-- TGS heater control, `R0`, `Rs/R0`, or gas conversion
+- TGS heater behavior, `R0`, `Rs/R0`, or gas conversion
 - actuator or display wiring
-- Linux service user, permissions, groups, overlays, or udev rules
+- boot overlays, udev rules, system services, or privilege changes not explicitly requested
 
 When required information is missing:
 
@@ -219,16 +258,18 @@ Provisional defaults are allowed only when they are manufacturer-supported, clea
 
 ---
 
-## 4. Provisional Runtime Profile
+## 5. Provisional Runtime Profile
 
 These defaults support initial integration and may change after real measurements.
 
 ### Shared I2C
 
-- Default to one named, configurable adapter for Board 1 and SHT45.
-- Keep the adapter path unset or disabled until explicitly configured on the Pi.
-- Serialize access when multiple drivers share an adapter.
+- The machine-specific configuration should use `/dev/i2c-1` for Board 1 and SHT45.
+- The generic example configuration should keep machine-specific paths unset or clearly marked as examples.
+- Serialize access when multiple drivers share the adapter.
 - Permit per-device or per-board overrides.
+- Do not treat the bus as hardware-validated until the connected scan shows `0x44`, `0x59`, `0x69`, `0x6A`, and `0x76`.
+- Keep these machine-specific values in a local TOML file; preserve a portable generic example configuration.
 
 ### SHT45
 
@@ -270,18 +311,22 @@ Keep all three runtime-configurable. Retain signed raw code and differential vol
 Confirmed and initial settings:
 
 ```text
-reference  -> external 4.096 V
-SPI mode   -> mode 1
-PGA        -> x1 provisional
-SPI clock  -> 1 MHz provisional
-channels   -> confirmed AIN0-AIN5 mapping
+reference   -> external 4.096 V
+SPI device  -> /dev/spidev0.0 for this Pi
+SPI mode    -> mode 1
+SPI clock   -> 1 MHz provisional
+GPIO chip   -> /dev/gpiochip4, expected label pinctrl-rp1
+START       -> line 17, active high
+DRDY#       -> line 27, active low
+PGA         -> x1 provisional
+channels    -> confirmed AIN0-AIN5 mapping
 ```
 
 Keep clock, PGA, data rate, digital filter, DRDY use, channel settling, and conversion sequencing configurable. Retain signed raw code and ADC input voltage only.
 
 ---
 
-## 5. Software Architecture and Driver Rules
+## 6. Software Architecture and Driver Rules
 
 Preserve the existing separation of responsibilities:
 
@@ -329,7 +374,7 @@ Stop and report conflicts instead of guessing.
 
 ---
 
-## 6. Data, Scheduling, and Logging Contract
+## 7. Data, Scheduling, and Logging Contract
 
 The existing versioned raw `SensorFrame` and CSV schema are part of the acquisition contract. Preserve stable field meaning and order within a schema version.
 
@@ -382,7 +427,7 @@ Production log rotation, disk quotas, crash recovery, and abrupt-power-loss guar
 
 ---
 
-## 7. Raspberry Pi Integration and Validation
+## 8. Raspberry Pi Integration and Validation
 
 ### Native build
 
@@ -400,16 +445,16 @@ Do not claim hardware verification from compilation or mock tests.
 
 Validate in this order:
 
-1. Raspberry Pi native build and mock tests
-2. I2C/SPI/GPIO device discovery and permissions
-3. common-ground and signal-voltage checks
-4. Board 1 I2C devices
-5. Board 2 SHT45
-6. NH3 and H2S MCP3421 readings
-7. ADS114S06 SPI, START, DRDY#, and register readback
-8. six TGS channels
-9. integrated SensorManager and CSV logging
-10. extended stability and fault tests
+1. Create the machine-specific runtime configuration from Section 3.
+2. Run the Raspberry Pi native build and mock tests.
+3. Recheck device nodes, GPIO label, pinmux, and permissions.
+4. With all systems unpowered, complete the documented wiring and common-ground connection.
+5. Power the Pi and both independently powered boards; verify no unintended rail connection or back-powering.
+6. Scan `/dev/i2c-1` and confirm all five expected addresses.
+7. Validate SHT45, SGP41, BME690, and both MCP3421 devices individually.
+8. Validate ADS114S06 SPI, START, DRDY#, register readback, and six TGS channels.
+9. Run integrated SensorManager and CSV logging.
+10. Run extended stability, disconnect, and clean-shutdown tests.
 
 Expected I2C addresses on the provisional shared bus:
 
@@ -425,12 +470,14 @@ Do not repeatedly scan I2C during normal acquisition and do not probe unknown ad
 
 ### Required real-hardware checks
 
-Confirm and record:
+The selected paths and mappings are documented in Section 3. On the target Pi, confirm that they still exist after boot and then verify:
 
-- actual `/dev/i2c-*`, `/dev/spidev*`, and `/dev/gpiochip*`
-- physical-header, BCM GPIO, chip, and line-offset mapping
-- permissions and required packages
-- SPI mode 1 and stable clock
+- `/dev/i2c-1`, `/dev/spidev0.0`, and `/dev/gpiochip4` are accessible
+- `/dev/gpiochip4` has label `pinctrl-rp1`
+- GPIO2/3 are muxed for I2C and GPIO9/10/11 for SPI0
+- GPIO17 and GPIO27 are available before the application requests them
+- the current user can access I2C, SPI, and GPIO without running the application as root
+- SPI mode 1 and a stable initial clock
 - ADS register readback
 - actual DRDY# active edge and timeout behavior
 - START behavior and selected conversion sequence
@@ -456,7 +503,7 @@ Do not edit boot overlays, user groups, udev rules, services, or system configur
 
 ---
 
-## 8. Testing, Coding, and Change Rules
+## 9. Testing, Coding, and Change Rules
 
 Use RAII for Linux resources. Use fixed-width integer types where data width matters. Include units in names such as `VoltageV`, `PressurePa`, `TimeoutMs`, and `ResistanceOhm`. Keep functions focused and compile with warnings enabled.
 
@@ -486,7 +533,7 @@ After changes:
 
 ---
 
-## 9. Deferred Scope
+## 10. Deferred Scope
 
 Do not implement these unless explicitly requested and required information is available:
 

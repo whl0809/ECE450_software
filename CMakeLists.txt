@@ -13,6 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(odor_core
+    src/app/RuntimeConfig.cpp
     src/drivers/ADS114S06Driver.cpp
     src/drivers/BME690Driver.cpp
     src/drivers/MCP3421Driver.cpp
@@ -36,6 +37,7 @@ endif()
 
 if(ODOR_BUILD_LINUX_HARDWARE)
     add_library(odor_linux_hardware
+        src/app/LinuxHardwareValidation.cpp
         src/hardware/linux/LinuxGpioLine.cpp
         src/hardware/linux/LinuxI2CBus.cpp
         src/hardware/linux/LinuxSPIDevice.cpp
@@ -52,6 +54,10 @@ endif()
 
 add_executable(odor_sensing_app src/main.cpp)
 target_link_libraries(odor_sensing_app PRIVATE odor_core)
+if(ODOR_BUILD_LINUX_HARDWARE)
+    target_link_libraries(odor_sensing_app PRIVATE odor_linux_hardware)
+    target_compile_definitions(odor_sensing_app PRIVATE ODOR_HAS_LINUX_HARDWARE=1)
+endif()
 
 enable_testing()
 

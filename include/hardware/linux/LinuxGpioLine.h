@@ -20,6 +20,7 @@ struct LinuxGpioConfig {
     unsigned int lineOffset = 0;
     std::string consumer = "odor-sensing";
     GpioDirection direction = GpioDirection::Input;
+    GpioEdge edge = GpioEdge::None;
     bool activeLow = false;
     bool initialOutputValue = false;
 };

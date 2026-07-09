@@ -4,6 +4,7 @@
 #include <cstring>
 #include <gpiod.h>
 #include <poll.h>
+#include <time.h>
 #include <utility>
 
 namespace odor::hardware::linux {
@@ -50,6 +51,12 @@ HardwareResult LinuxGpioLine::request()
     if (config_.direction == GpioDirection::Output) {
         result = gpiod_line_request_output_flags(
             line_, config_.consumer.c_str(), flags, config_.initialOutputValue ? 1 : 0);
+    } else if (config_.edge == GpioEdge::Rising) {
+        result = gpiod_line_request_rising_edge_events_flags(line_, config_.consumer.c_str(), flags);
+    } else if (config_.edge == GpioEdge::Falling) {
+        result = gpiod_line_request_falling_edge_events_flags(line_, config_.consumer.c_str(), flags);
+    } else if (config_.edge == GpioEdge::Both) {
+        result = gpiod_line_request_both_edges_events_flags(line_, config_.consumer.c_str(), flags);
     } else {
         result = gpiod_line_request_input_flags(line_, config_.consumer.c_str(), flags);
     }
@@ -109,9 +116,29 @@ HardwareResult LinuxGpioLine::write(bool value)
     return HardwareResult::success();
 }
 
-HardwareResult LinuxGpioLine::waitForEdge(GpioEdge, std::chrono::milliseconds)
+HardwareResult LinuxGpioLine::waitForEdge(GpioEdge, std::chrono::milliseconds timeout)
 {
-    return HardwareResult::failure(-ENOSYS, "GPIO edge waiting is not implemented yet");
+    if (line_ == nullptr) {
+        return HardwareResult::failure(-ENODEV, "GPIO line is not requested");
+    }
+
+    const timespec ts{
+        static_cast<time_t>(timeout.count() / 1000),
+        static_cast<long>((timeout.count() % 1000) * 1000000L),
+    };
+    const int result = gpiod_line_event_wait(line_, &ts);
+    if (result < 0) {
+        return errnoFailure("wait for GPIO edge");
+    }
+    if (result == 0) {
+        return HardwareResult::failure(-ETIMEDOUT, "wait for GPIO edge timed out");
+    }
+
+    gpiod_line_event event{};
+    if (gpiod_line_event_read(line_, &event) < 0) {
+        return errnoFailure("read GPIO edge event");
+    }
+    return HardwareResult::success();
 }
 
 }  // namespace odor::hardware::linux

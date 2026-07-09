@@ -3,9 +3,9 @@
 Linux user-space scaffold for the Raspberry Pi 5 version of the odor-sensing
 project. The software platform is Raspberry Pi OS, CMake, and C++17.
 
-This scaffold does not access real hardware by default. The executable starts,
-initializes `SensorManager` with unconfigured mock hardware interfaces, handles
-`SIGINT`/`SIGTERM`, and prints a non-blocking heartbeat.
+The executable can run either with safe mock interfaces or with a validated
+machine-specific Raspberry Pi runtime configuration. It handles `SIGINT` and
+`SIGTERM` and prints a non-blocking heartbeat during normal execution.
 
 ## Hardware Architecture
 
@@ -161,6 +161,7 @@ src/
 
 tests/unit/
 config/odor-sensing.example.toml
+config/odor-sensing.rpi5.toml
 ```
 
 ## Raspberry Pi OS Dependencies
@@ -193,8 +194,29 @@ ctest --test-dir build --output-on-failure
 
 ## Run
 
+Validate the selected machine-specific configuration without starting
+acquisition:
+
 ```bash
-./build/odor_sensing_app
+./build/odor_sensing_app --config config/odor-sensing.rpi5.toml --validate-only
+```
+
+Run independent hardware diagnostics for the configured devices:
+
+```bash
+./build/odor_sensing_app --config config/odor-sensing.rpi5.toml --diagnostic
+```
+
+Run the normal application loop with hardware enabled after validation passes:
+
+```bash
+./build/odor_sensing_app --config config/odor-sensing.rpi5.toml
+```
+
+Run without hardware access:
+
+```bash
+./build/odor_sensing_app --mock
 ```
 
 Expected output:
@@ -204,9 +226,9 @@ Odor Sensing Raspberry Pi 5 Application
 Version: scaffold-0.1
 Build: ...
 Target: Raspberry Pi 5 / Raspberry Pi OS
-Hardware access: disabled until runtime device paths are configured
-SensorManager initialization: NOT CONFIGURED
-Sensor interfaces are not yet enabled
+Runtime configuration validated: config/odor-sensing.rpi5.toml
+Hardware access: enabled from runtime configuration
+SensorManager initialization: OK
 heartbeat,uptime_ms=1000
 ```
 
@@ -222,6 +244,15 @@ The example TOML currently selects these provisional software defaults:
 - MCP3421 one-shot, 16-bit, gain x1, retaining signed raw code and differential voltage only.
 - ADS114S06 external 4.096 V reference, fixed TGS channel mapping, and raw-code/voltage output only.
 
+The machine-specific `config/odor-sensing.rpi5.toml` currently selects:
+
+- shared I2C adapter `/dev/i2c-1`
+- ADS114S06 SPI device `/dev/spidev0.0`
+- SPI mode `1`, 8 bits per word, provisional `1 MHz` clock
+- GPIO controller `/dev/gpiochip4`, expected label `pinctrl-rp1`
+- ADS START GPIO line `17`, active high
+- ADS DRDY# GPIO line `27`, active low
+
 ## Raw CSV Schema
 
 `RawCsvLogger` writes schema version `1` with stable columns for monotonic and
@@ -235,10 +266,9 @@ valid outputs.
 
 ## Still Unresolved
 
-- I2C adapter path or paths, such as `/dev/i2c-*`
-- SPI device path for ADS114S06, such as `/dev/spidev*`
-- GPIO chip identity/path and line offsets for ADS114S06 `DRDY#` and `START`
-- Raspberry Pi physical header or BCM GPIO assignments
+- Connected-board validation of `/dev/i2c-1`, `/dev/spidev0.0`, `/dev/gpiochip4`, GPIO17, and GPIO27
+- Confirmation that `/dev/gpiochip4` still reports label `pinctrl-rp1` after boot
+- Confirmation of the five expected I2C addresses on `/dev/i2c-1`
 - ADS114S06 uses SPI mode 1; bit order, clock, PGA gain, data rate, filter, and conversion sequencing still need hardware validation.
 - MCP3421 gain, resolution, and conversion mode
 - Electrochemical polarity, zero offset, sensitivity, and calibration constants
@@ -250,6 +280,6 @@ valid outputs.
 
 ## Next Step
 
-Confirm Raspberry Pi I2C/SPI/GPIO device paths and permissions without probing
-unconfirmed sensor hardware. Keep hardware access disabled until the runtime
-configuration can be validated safely.
+Run the native Raspberry Pi build, then run `--validate-only`. After wiring and
+power checks are complete, run `--diagnostic` to initialize and read each known
+sensor path independently. Do not treat the output as calibrated gas data.

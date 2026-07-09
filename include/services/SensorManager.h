@@ -8,16 +8,29 @@
 #include "drivers/SGP41Driver.h"
 #include "drivers/SHT45Driver.h"
 #include "hardware/II2CBus.h"
+#include "hardware/IGpioLine.h"
 #include "hardware/ISPIDevice.h"
 #include "sensor_types.h"
 
 namespace odor {
+
+struct SensorManagerRuntimeProfile {
+    bool i2cBusAssignmentsConfirmed = false;
+    bool adsSpiConfigured = false;
+    bool adsDrdyConfigured = false;
+    config::Ads114s06RuntimeSettings adsRuntime = config::Ads114s06Defaults;
+};
 
 class SensorManager {
 public:
     SensorManager(hardware::II2CBus& i2c0,
                   hardware::II2CBus& i2c1,
                   hardware::ISPIDevice& adsSpi);
+    SensorManager(hardware::II2CBus& i2c0,
+                  hardware::II2CBus& i2c1,
+                  hardware::ISPIDevice& adsSpi,
+                  hardware::IGpioLine* adsDrdy,
+                  const SensorManagerRuntimeProfile& profile);
 
     OperationResult begin();
     void update(std::chrono::steady_clock::time_point now);
@@ -33,6 +46,8 @@ private:
     hardware::II2CBus& i2c0_;
     hardware::II2CBus& i2c1_;
     hardware::ISPIDevice& adsSpi_;
+    hardware::IGpioLine* adsDrdy_ = nullptr;
+    SensorManagerRuntimeProfile profile_{};
 
     ADS114S06Driver ads114s06_;
     MCP3421Driver nh3Mcp3421_;

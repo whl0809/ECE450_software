@@ -6,59 +6,63 @@ namespace odor {
 
 namespace {
 
-ADS114S06Config makeAdsConfig()
+ADS114S06Config makeAdsConfig(const SensorManagerRuntimeProfile& profile)
 {
-    return {
+    ADS114S06Config config = {
         false,
         false,
         config::Ads114s06StartExposedOnConnector,
         config::Ads114s06ChipSelectPermanentlyAsserted,
         config::Ads114s06ResetControlledByRaspberryPi,
         config::Ads114s06ReferenceVoltageV,
-        config::Ads114s06Defaults,
+        profile.adsRuntime,
     };
+    config.spiDeviceConfigured = profile.adsSpiConfigured;
+    config.drdyConfigured = profile.adsDrdyConfigured;
+    return config;
 }
 
 MCP3421Config makeMcpConfig(const char* label,
                             uint8_t i2cAddress,
-                            config::ElectrochemicalFrontEndConfig frontEnd)
+                            config::ElectrochemicalFrontEndConfig frontEnd,
+                            const SensorManagerRuntimeProfile& profile)
 {
     return {
         true,
         i2cAddress,
-        false,
+        profile.i2cBusAssignmentsConfirmed,
         label,
         frontEnd,
         config::Mcp3421Defaults,
     };
 }
 
-SHT45Config makeSht45Config()
+SHT45Config makeSht45Config(const SensorManagerRuntimeProfile& profile)
 {
     return {
         true,
         config::Sht45I2cAddress,
-        false,
+        profile.i2cBusAssignmentsConfirmed,
         config::Sht45Defaults,
     };
 }
 
-SGP41Config makeSgp41Config()
+SGP41Config makeSgp41Config(const SensorManagerRuntimeProfile& profile)
 {
     return {
         true,
         config::Sgp41I2cAddress,
-        false,
+        profile.i2cBusAssignmentsConfirmed,
         config::Sgp41Defaults,
     };
 }
 
-BME690Config makeBme690Config()
+BME690Config makeBme690Config(const SensorManagerRuntimeProfile& profile)
 {
     return {
         true,
         config::Bme690I2cAddress,
-        false,
+        profile.i2cBusAssignmentsConfirmed,
         config::Bme690Defaults,
     };
 }
@@ -68,15 +72,26 @@ BME690Config makeBme690Config()
 SensorManager::SensorManager(hardware::II2CBus& i2c0,
                              hardware::II2CBus& i2c1,
                              hardware::ISPIDevice& adsSpi)
+    : SensorManager(i2c0, i2c1, adsSpi, nullptr, SensorManagerRuntimeProfile{})
+{
+}
+
+SensorManager::SensorManager(hardware::II2CBus& i2c0,
+                             hardware::II2CBus& i2c1,
+                             hardware::ISPIDevice& adsSpi,
+                             hardware::IGpioLine* adsDrdy,
+                             const SensorManagerRuntimeProfile& profile)
     : i2c0_(i2c0),
       i2c1_(i2c1),
       adsSpi_(adsSpi),
-      ads114s06_(adsSpi_, makeAdsConfig()),
-      nh3Mcp3421_(i2c0_, makeMcpConfig("NH3", config::Nh3Mcp3421I2cAddress, config::Nh3FrontEnd)),
-      h2sMcp3421_(i2c1_, makeMcpConfig("H2S", config::H2sMcp3421I2cAddress, config::H2sFrontEnd)),
-      sht45_(i2c0_, makeSht45Config()),
-      sgp41_(i2c0_, makeSgp41Config()),
-      bme690_(i2c0_, makeBme690Config())
+      adsDrdy_(adsDrdy),
+      profile_(profile),
+      ads114s06_(adsSpi_, adsDrdy_, makeAdsConfig(profile_)),
+      nh3Mcp3421_(i2c0_, makeMcpConfig("NH3", config::Nh3Mcp3421I2cAddress, config::Nh3FrontEnd, profile_)),
+      h2sMcp3421_(i2c1_, makeMcpConfig("H2S", config::H2sMcp3421I2cAddress, config::H2sFrontEnd, profile_)),
+      sht45_(i2c0_, makeSht45Config(profile_)),
+      sgp41_(i2c0_, makeSgp41Config(profile_)),
+      bme690_(i2c0_, makeBme690Config(profile_))
 {
 }
 
