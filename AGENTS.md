@@ -21,6 +21,7 @@ The sensor-acquisition scaffold is already implemented and host-validated:
 - SHT45, SGP41, BME690, MCP3421, and ADS114S06 protocol logic exists.
 - BME690 behavior follows Bosch's official BME690/BME69x SensorAPI flow.
 - ADS114S06 register configuration follows the TI ADS114S06 datasheet and uses SPI mode 1.
+- ADS114S06 software now asserts the configured START GPIO line high before ADS reset-snapshot diagnostics, initialization, and conversion starts; this is host/mock-validated only and does not prove hardware communication.
 - Mock-based driver tests exist.
 - A stable versioned raw `SensorFrame` and CSV schema exist.
 - Windows/MinGW CMake builds and tests have passed.

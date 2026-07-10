@@ -184,6 +184,7 @@ int runHardwareDiagnostic(odor::hardware::II2CBus& primaryI2c,
                           odor::hardware::II2CBus& secondaryI2c,
                           odor::hardware::ISPIDevice& adsSpi,
                           odor::hardware::IGpioLine& adsDrdy,
+                          odor::hardware::IGpioLine& adsStart,
                           const odor::app::RuntimeConfig& config)
 {
     const odor::config::Ads114s06RuntimeSettings adsRuntime = adsRuntimeFrom(config);
@@ -207,6 +208,7 @@ int runHardwareDiagnostic(odor::hardware::II2CBus& primaryI2c,
                              odor::config::Mcp3421Defaults});
     odor::ADS114S06Driver ads(adsSpi,
                               &adsDrdy,
+                              &adsStart,
                               {true,
                                config.adsDrdy.configured,
                                config.adsStart.configured,
@@ -357,13 +359,14 @@ int runLinuxApplication(const odor::app::RuntimeConfig& config, bool diagnostic)
         adsDrdyLine = adsDrdy.get();
 
         if (diagnostic) {
-            return runHardwareDiagnostic(*primaryBus, *h2sBus, *adsSpiDevice, *adsDrdyLine, config);
+            return runHardwareDiagnostic(*primaryBus, *h2sBus, *adsSpiDevice, *adsDrdyLine, *adsStart, config);
         }
     }
 
     odor::SensorManagerRuntimeProfile profile;
     profile.i2cBusAssignmentsConfirmed = true;
     profile.adsSpiConfigured = config.enableAds114s06;
+    profile.adsStartConfigured = config.adsStart.configured;
     profile.adsDrdyConfigured = config.adsDrdy.configured;
     profile.enableTgsArray = config.enableAds114s06;
     profile.enableNh3Sensor = config.enableNh3Mcp3421;
@@ -373,7 +376,7 @@ int runLinuxApplication(const odor::app::RuntimeConfig& config, bool diagnostic)
     profile.enableSht45 = config.enableSht45;
     profile.adsRuntime = adsRuntimeFrom(config);
 
-    odor::SensorManager sensorManager(*primaryBus, *h2sBus, *adsSpiDevice, adsDrdyLine, profile);
+    odor::SensorManager sensorManager(*primaryBus, *h2sBus, *adsSpiDevice, adsDrdyLine, adsStart.get(), profile);
     const odor::OperationResult beginResult = sensorManager.begin();
     std::cout << "Hardware access: enabled from runtime configuration\n";
     std::cout << "SensorManager initialization: " << initializationStatusText(beginResult) << '\n';

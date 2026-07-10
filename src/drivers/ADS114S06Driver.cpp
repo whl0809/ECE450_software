@@ -67,14 +67,22 @@ OperationResult spiError()
 }  // namespace
 
 ADS114S06Driver::ADS114S06Driver(hardware::ISPIDevice& spiDevice, const ADS114S06Config& config)
-    : spiDevice_(spiDevice), config_(config)
+    : ADS114S06Driver(spiDevice, nullptr, nullptr, config)
 {
 }
 
 ADS114S06Driver::ADS114S06Driver(hardware::ISPIDevice& spiDevice,
                                  hardware::IGpioLine* drdyLine,
                                  const ADS114S06Config& config)
-    : spiDevice_(spiDevice), drdyLine_(drdyLine), config_(config)
+    : ADS114S06Driver(spiDevice, drdyLine, nullptr, config)
+{
+}
+
+ADS114S06Driver::ADS114S06Driver(hardware::ISPIDevice& spiDevice,
+                                 hardware::IGpioLine* drdyLine,
+                                 hardware::IGpioLine* startLine,
+                                 const ADS114S06Config& config)
+    : spiDevice_(spiDevice), drdyLine_(drdyLine), startLine_(startLine), config_(config)
 {
 }
 
@@ -96,8 +104,18 @@ OperationResult ADS114S06Driver::begin()
         status_ = {true, false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
         return {false, status_.errorFlags};
     }
+    if (config_.startConfigured && (startLine_ == nullptr || !startLine_->isConfigured())) {
+        status_ = {true, false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
+        return {false, status_.errorFlags};
+    }
 
-    OperationResult result = readDeviceId();
+    OperationResult result = assertStartLineHigh("begin");
+    if (!result.ok) {
+        status_ = {true, false, result.errorFlags};
+        return result;
+    }
+
+    result = readDeviceId();
     if (!result.ok) {
         status_ = {true, false, result.errorFlags};
         return result;
@@ -183,6 +201,14 @@ OperationResult ADS114S06Driver::runResetRegisterSnapshotDiagnostic()
     if (!config_.spiDeviceConfigured || !spiDevice_.isConfigured()) {
         return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
     }
+    if (config_.startConfigured && (startLine_ == nullptr || !startLine_->isConfigured())) {
+        return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
+    }
+
+    OperationResult startResult = assertStartLineHigh("diagnostic_reset_snapshot");
+    if (!startResult.ok) {
+        return startResult;
+    }
 
     std::vector<uint8_t> resetRx;
     const std::vector<uint8_t> resetTx = {AdsCommandReset};
@@ -245,6 +271,30 @@ OperationResult ADS114S06Driver::runResetRegisterSnapshotDiagnostic()
     }
 
     emitDiagnostic(snapshotEvent);
+    return {true, 0};
+}
+
+OperationResult ADS114S06Driver::assertStartLineHigh(const std::string& stage)
+{
+    if (!config_.startConfigured) {
+        return {true, 0};
+    }
+    if (startLine_ == nullptr || !startLine_->isConfigured()) {
+        return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
+    }
+
+    const hardware::HardwareResult result = startLine_->write(true);
+    if (!result.ok) {
+        ADS114S06DiagnosticEvent event;
+        event.stage = stage + "_start_line_high";
+        event.errorFlags = toErrorFlags(ErrorFlag::CommunicationFailure);
+        emitDiagnostic(event);
+        return {false, event.errorFlags};
+    }
+
+    ADS114S06DiagnosticEvent event;
+    event.stage = stage + "_start_line_high";
+    emitDiagnostic(event);
     return {true, 0};
 }
 
@@ -405,6 +455,11 @@ OperationResult ADS114S06Driver::selectChannel(uint8_t ain)
 
 OperationResult ADS114S06Driver::startConversion()
 {
+    OperationResult startLineResult = assertStartLineHigh("start_conversion");
+    if (!startLineResult.ok) {
+        return startLineResult;
+    }
+
     std::vector<uint8_t> ignored;
     const hardware::HardwareResult result = spiDevice_.transfer({AdsCommandStart}, ignored);
     if (!result.ok) {

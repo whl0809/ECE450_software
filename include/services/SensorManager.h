@@ -17,6 +17,7 @@ namespace odor {
 struct SensorManagerRuntimeProfile {
     bool i2cBusAssignmentsConfirmed = false;
     bool adsSpiConfigured = false;
+    bool adsStartConfigured = false;
     bool adsDrdyConfigured = false;
     bool enableTgsArray = config::EnableTgsArray;
     bool enableNh3Sensor = config::EnableNh3Sensor;
@@ -37,6 +38,12 @@ public:
                   hardware::ISPIDevice& adsSpi,
                   hardware::IGpioLine* adsDrdy,
                   const SensorManagerRuntimeProfile& profile);
+    SensorManager(hardware::II2CBus& i2c0,
+                  hardware::II2CBus& i2c1,
+                  hardware::ISPIDevice& adsSpi,
+                  hardware::IGpioLine* adsDrdy,
+                  hardware::IGpioLine* adsStart,
+                  const SensorManagerRuntimeProfile& profile);
 
     OperationResult begin();
     void update(std::chrono::steady_clock::time_point now);
@@ -53,6 +60,7 @@ private:
     hardware::II2CBus& i2c1_;
     hardware::ISPIDevice& adsSpi_;
     hardware::IGpioLine* adsDrdy_ = nullptr;
+    hardware::IGpioLine* adsStart_ = nullptr;
     SensorManagerRuntimeProfile profile_{};
 
     ADS114S06Driver ads114s06_;

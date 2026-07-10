@@ -57,8 +57,6 @@ constexpr float TgsApproximateLoadResistanceOhm = 10000.0F;
 constexpr float Ads114s06ReferenceVoltageV = 4.096F;
 constexpr bool Ads114s06ChipSelectPermanentlyAsserted = true;
 constexpr bool Ads114s06ResetControlledByRaspberryPi = false;
-constexpr bool Ads114s06StartExposedOnConnector = true;
-constexpr bool Ads114s06DrdyExposedOnConnector = true;
 
 enum class ElectrochemicalElectrodeMode {
     ThreeElectrodeProvisional,

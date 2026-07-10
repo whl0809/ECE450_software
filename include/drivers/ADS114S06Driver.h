@@ -45,6 +45,10 @@ public:
     ADS114S06Driver(hardware::ISPIDevice& spiDevice,
                     hardware::IGpioLine* drdyLine,
                     const ADS114S06Config& config);
+    ADS114S06Driver(hardware::ISPIDevice& spiDevice,
+                    hardware::IGpioLine* drdyLine,
+                    hardware::IGpioLine* startLine,
+                    const ADS114S06Config& config);
 
     OperationResult begin();
     DriverStatus status() const;
@@ -57,6 +61,7 @@ private:
     OperationResult writeRegister(uint8_t reg, uint8_t value, const std::string& stage);
     OperationResult readRegister(uint8_t reg, uint8_t& value, const std::string& stage);
     OperationResult writeRegisterChecked(uint8_t reg, uint8_t value);
+    OperationResult assertStartLineHigh(const std::string& stage);
     OperationResult verifyMaskedRegister(uint8_t reg,
                                          uint8_t requestedValue,
                                          uint8_t readbackMask,
@@ -73,6 +78,7 @@ private:
 
     hardware::ISPIDevice& spiDevice_;
     hardware::IGpioLine* drdyLine_ = nullptr;
+    hardware::IGpioLine* startLine_ = nullptr;
     ADS114S06Config config_;
     DriverStatus status_;
     ADS114S06DiagnosticCallback diagnosticCallback_;
