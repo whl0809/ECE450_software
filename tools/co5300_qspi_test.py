@@ -31,6 +31,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 import time
 from collections import namedtuple
@@ -150,23 +151,46 @@ def load_init_commands(path: Path) -> list[InitCommand]:
 
 
 def detect_gpiochip_number() -> int:
-    """Prefer the RP1 pin controller, then fall back to common Pi 5 numbers."""
-    sysfs = Path("/sys/class/gpio")
-    if sysfs.exists():
-        for entry in sorted(sysfs.glob("gpiochip*")):
-            label_path = entry / "label"
-            try:
-                label = label_path.read_text(encoding="utf-8").strip().lower()
-            except OSError:
-                continue
-            if "rp1" in label or "pinctrl-rp1" in label:
-                match = re.fullmatch(r"gpiochip(\d+)", entry.name)
-                if match:
-                    return int(match.group(1))
+    """Return the /dev/gpiochipN index for the RP1 GPIO controller.
 
-    for candidate in (4, 0):
+    Important: names under /sys/class/gpio such as gpiochip569 contain the
+    global GPIO base number, not necessarily the character-device index.
+    Therefore this function first parses `gpiodetect`, whose gpiochipN names
+    match /dev/gpiochipN.
+    """
+    try:
+        completed = subprocess.run(
+            ["gpiodetect"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        for line in completed.stdout.splitlines():
+            lower = line.lower()
+            if "rp1" not in lower:
+                continue
+            match = re.match(r"\s*gpiochip(\d+)\b", line)
+            if match:
+                candidate = int(match.group(1))
+                if Path(f"/dev/gpiochip{candidate}").exists():
+                    return candidate
+    except (FileNotFoundError, OSError):
+        pass
+
+    # Prefer common Raspberry Pi 5 device indices when present.
+    for candidate in (0, 4):
         if Path(f"/dev/gpiochip{candidate}").exists():
             return candidate
+
+    # Last resort: use the first actual character device, never a sysfs base.
+    devices = []
+    for path in Path("/dev").glob("gpiochip*"):
+        match = re.fullmatch(r"gpiochip(\d+)", path.name)
+        if match:
+            devices.append(int(match.group(1)))
+    if devices:
+        return min(devices)
+
     raise CO5300Error("No suitable /dev/gpiochipN device was found")
 
 
