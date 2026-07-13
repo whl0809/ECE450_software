@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
+#include <cmath>
 #include <exception>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -65,6 +66,17 @@ uint32_t parseUint(const std::string& value)
     return static_cast<uint32_t>(result);
 }
 
+float parseFloat(const std::string& value)
+{
+    const std::string normalized = unquote(value);
+    size_t parsed = 0;
+    const float result = std::stof(normalized, &parsed);
+    if (parsed != normalized.size()) {
+        throw std::invalid_argument("invalid float: " + normalized);
+    }
+    return result;
+}
+
 config::Ads114s06PgaGain parseAdsGain(const std::string& value)
 {
     switch (parseUint(value)) {
@@ -118,6 +130,8 @@ void setKnownValue(RuntimeConfig& config,
         config.adsBitsPerWord = static_cast<uint8_t>(parseUint(value));
     } else if (section == "ads114s06.spi" && key == "max_speed_hz") {
         config.adsMaxSpeedHz = parseUint(value);
+    } else if (section == "ads114s06.spi" && key == "reference_voltage_v") {
+        config.adsReferenceVoltageV = parseFloat(value);
     } else if (section == "ads114s06.spi" && key == "pga_gain") {
         config.adsPgaGain = parseAdsGain(value);
     } else if (section == "ads114s06.spi" && key == "data_rate_code") {
@@ -215,6 +229,8 @@ ValidationResult validateRuntimeConfigValues(const RuntimeConfig& config)
         require(config.adsBitsPerWord == 8U, "ADS114S06 SPI bits_per_word must be 8");
         require(config.adsMaxSpeedHz > 0U, "ADS114S06 SPI max_speed_hz must be nonzero");
         require(config.adsMaxSpeedHz <= 1000000U, "ADS114S06 provisional SPI clock must not exceed 1 MHz");
+        require(std::fabs(config.adsReferenceVoltageV - config::Ads114s06ReferenceVoltageV) < 0.001F,
+                "ADS114S06 reference_voltage_v must be 2.5 for the internal reference profile");
         require(!config.gpioChipPath.empty(), "GPIO chip path is missing");
         require(!config.gpioChipExpectedLabel.empty(), "expected GPIO chip label is missing");
         require(config.adsStart.configured, "ADS START GPIO line offset is missing");

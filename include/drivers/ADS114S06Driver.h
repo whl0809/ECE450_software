@@ -18,7 +18,7 @@ struct ADS114S06Config {
     bool startConfigured = false;
     bool chipSelectPermanentlyAsserted = true;
     bool resetControlledByRaspberryPi = false;
-    float referenceVoltageV = 4.096F;
+    float referenceVoltageV = 2.5F;
     config::Ads114s06RuntimeSettings runtime{};
 };
 
@@ -61,11 +61,12 @@ private:
     OperationResult writeRegister(uint8_t reg, uint8_t value, const std::string& stage);
     OperationResult readRegister(uint8_t reg, uint8_t& value, const std::string& stage);
     OperationResult writeRegisterChecked(uint8_t reg, uint8_t value);
-    OperationResult assertStartLineHigh(const std::string& stage);
+    OperationResult holdStartLineLow(const std::string& stage);
     OperationResult verifyMaskedRegister(uint8_t reg,
                                          uint8_t requestedValue,
                                          uint8_t readbackMask,
                                          const std::string& stage);
+    OperationResult configureReference();
     OperationResult configureRegisters();
     OperationResult selectChannel(uint8_t ain);
     OperationResult startConversion();

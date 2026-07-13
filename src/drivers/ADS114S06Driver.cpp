@@ -29,6 +29,8 @@ constexpr uint8_t AdsAincom = 0x0C;
 constexpr uint8_t AdsRequiredSpiMode = 1;
 constexpr uint8_t AdsDeviceIdMask = 0x07;
 constexpr uint8_t Ads114S06DeviceIdExpected = 0x05;
+constexpr uint8_t AdsRefInternalAlwaysOn = 0x3A;
+constexpr std::chrono::milliseconds AdsInternalReferenceSettleTime{10};
 
 float adsGainValue(config::Ads114s06PgaGain gain)
 {
@@ -109,7 +111,7 @@ OperationResult ADS114S06Driver::begin()
         return {false, status_.errorFlags};
     }
 
-    OperationResult result = assertStartLineHigh("begin");
+    OperationResult result = holdStartLineLow("begin");
     if (!result.ok) {
         status_ = {true, false, result.errorFlags};
         return result;
@@ -205,7 +207,7 @@ OperationResult ADS114S06Driver::runResetRegisterSnapshotDiagnostic()
         return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
     }
 
-    OperationResult startResult = assertStartLineHigh("diagnostic_reset_snapshot");
+    OperationResult startResult = holdStartLineLow("diagnostic_reset_snapshot");
     if (!startResult.ok) {
         return startResult;
     }
@@ -274,7 +276,7 @@ OperationResult ADS114S06Driver::runResetRegisterSnapshotDiagnostic()
     return {true, 0};
 }
 
-OperationResult ADS114S06Driver::assertStartLineHigh(const std::string& stage)
+OperationResult ADS114S06Driver::holdStartLineLow(const std::string& stage)
 {
     if (!config_.startConfigured) {
         return {true, 0};
@@ -283,18 +285,15 @@ OperationResult ADS114S06Driver::assertStartLineHigh(const std::string& stage)
         return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
     }
 
-    const hardware::HardwareResult result = startLine_->write(true);
+    const hardware::HardwareResult result = startLine_->write(false);
     if (!result.ok) {
         ADS114S06DiagnosticEvent event;
-        event.stage = stage + "_start_line_high";
+        event.stage = stage + "_start_line_low";
         event.errorFlags = toErrorFlags(ErrorFlag::CommunicationFailure);
         emitDiagnostic(event);
         return {false, event.errorFlags};
     }
 
-    ADS114S06DiagnosticEvent event;
-    event.stage = stage + "_start_line_high";
-    emitDiagnostic(event);
     return {true, 0};
 }
 
@@ -439,9 +438,23 @@ OperationResult ADS114S06Driver::configureRegisters()
         return result;
     }
 
-    // REF register value 0 selects the external REFP0/REFN0 path and does not
-    // enable an internal reference; board hardware provides the 4.096 V REF5040.
-    return writeRegisterChecked(AdsRegisterRef, 0x00);
+    return configureReference();
+}
+
+OperationResult ADS114S06Driver::configureReference()
+{
+    OperationResult result = writeRegister(AdsRegisterRef,
+                                           AdsRefInternalAlwaysOn,
+                                           "register_0x" + std::to_string(AdsRegisterRef));
+    if (!result.ok) {
+        return result;
+    }
+
+    std::this_thread::sleep_for(AdsInternalReferenceSettleTime);
+    return verifyMaskedRegister(AdsRegisterRef,
+                                AdsRefInternalAlwaysOn,
+                                0xFF,
+                                "register_0x" + std::to_string(AdsRegisterRef));
 }
 
 OperationResult ADS114S06Driver::selectChannel(uint8_t ain)
@@ -455,7 +468,7 @@ OperationResult ADS114S06Driver::selectChannel(uint8_t ain)
 
 OperationResult ADS114S06Driver::startConversion()
 {
-    OperationResult startLineResult = assertStartLineHigh("start_conversion");
+    OperationResult startLineResult = holdStartLineLow("start_conversion");
     if (!startLineResult.ok) {
         return startLineResult;
     }

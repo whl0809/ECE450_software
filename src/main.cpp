@@ -214,7 +214,7 @@ int runHardwareDiagnostic(odor::hardware::II2CBus& primaryI2c,
                                config.adsStart.configured,
                                odor::config::Ads114s06ChipSelectPermanentlyAsserted,
                                odor::config::Ads114s06ResetControlledByRaspberryPi,
-                               odor::config::Ads114s06ReferenceVoltageV,
+                               config.adsReferenceVoltageV,
                                adsRuntime});
 
     int failures = 0;
@@ -374,6 +374,7 @@ int runLinuxApplication(const odor::app::RuntimeConfig& config, bool diagnostic)
     profile.enableSgp41 = config.enableSgp41;
     profile.enableBme690 = config.enableBme690;
     profile.enableSht45 = config.enableSht45;
+    profile.adsReferenceVoltageV = config.adsReferenceVoltageV;
     profile.adsRuntime = adsRuntimeFrom(config);
 
     odor::SensorManager sensorManager(*primaryBus, *h2sBus, *adsSpiDevice, adsDrdyLine, adsStart.get(), profile);

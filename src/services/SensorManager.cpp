@@ -14,7 +14,7 @@ ADS114S06Config makeAdsConfig(const SensorManagerRuntimeProfile& profile)
         false,
         config::Ads114s06ChipSelectPermanentlyAsserted,
         config::Ads114s06ResetControlledByRaspberryPi,
-        config::Ads114s06ReferenceVoltageV,
+        profile.adsReferenceVoltageV,
         profile.adsRuntime,
     };
     config.spiDeviceConfigured = profile.adsSpiConfigured;

@@ -34,6 +34,8 @@ HardwareResult MockGpioLine::write(bool value)
         return HardwareResult::failure(-1, "mock GPIO line is not configured");
     }
     value_ = value;
+    wasEverWrittenHigh_ = wasEverWrittenHigh_ || value;
+    ++writeCount_;
     return HardwareResult::success();
 }
 
@@ -75,6 +77,16 @@ void MockGpioLine::setPersistentWaitResult(HardwareResult result)
 void MockGpioLine::clearPersistentWaitResult()
 {
     hasPersistentWaitResult_ = false;
+}
+
+bool MockGpioLine::wasEverWrittenHigh() const
+{
+    return wasEverWrittenHigh_;
+}
+
+size_t MockGpioLine::writeCount() const
+{
+    return writeCount_;
 }
 
 }  // namespace odor::hardware::mock

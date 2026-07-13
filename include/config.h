@@ -54,7 +54,7 @@ constexpr std::array<TgsChannelConfig, TgsChannelCount> TgsChannels = {{
 
 constexpr float TgsApproximateLoadResistanceOhm = 10000.0F;
 
-constexpr float Ads114s06ReferenceVoltageV = 4.096F;
+constexpr float Ads114s06ReferenceVoltageV = 2.5F;
 constexpr bool Ads114s06ChipSelectPermanentlyAsserted = true;
 constexpr bool Ads114s06ResetControlledByRaspberryPi = false;
 

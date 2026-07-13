@@ -25,6 +25,7 @@ struct SensorManagerRuntimeProfile {
     bool enableSgp41 = config::EnableSgp41;
     bool enableBme690 = config::EnableBme690;
     bool enableSht45 = config::EnableSht45;
+    float adsReferenceVoltageV = config::Ads114s06ReferenceVoltageV;
     config::Ads114s06RuntimeSettings adsRuntime = config::Ads114s06Defaults;
 };
 

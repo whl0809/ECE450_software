@@ -22,6 +22,7 @@ public:
     void queueRxData(std::vector<uint8_t> data);
     void failNextTransfer(int errorCode, std::string message);
     const std::vector<uint8_t>& lastTx() const;
+    const std::vector<std::vector<uint8_t>>& txHistory() const;
 
 private:
     bool consumeFailure(HardwareResult& result);
@@ -31,6 +32,7 @@ private:
     std::vector<uint8_t> rxData_;
     std::deque<std::vector<uint8_t>> queuedRxData_;
     std::vector<uint8_t> lastTx_;
+    std::vector<std::vector<uint8_t>> txHistory_;
     bool failNext_ = false;
     int failCode_ = -1;
     std::string failMessage_;

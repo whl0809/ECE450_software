@@ -76,6 +76,9 @@ REFP0   -> external 4.096 V REF5040AIDR reference
 REFN0   -> AGND
 ```
 
+The current software profile selects the ADS114S06 internal 2.5 V reference
+with REFP/REFN input buffers disabled.
+
 Do not add an ADS114S06 chip-select GPIO. The ADC must be the only active
 device on its physical SPI data lines.
 
@@ -248,7 +251,7 @@ The example TOML currently selects these provisional software defaults:
 - SGP41 at 1 Hz using recent valid SHT45 compensation when available.
 - BME690 at `0x76` with Bosch SensorAPI-derived forced-measurement compensation and heater setup.
 - MCP3421 one-shot, 16-bit, gain x1, retaining signed raw code and differential voltage only.
-- ADS114S06 external 4.096 V reference, fixed TGS channel mapping, and raw-code/voltage output only.
+- ADS114S06 internal 2.5 V reference, fixed TGS channel mapping, and raw-code/voltage output only.
 
 The machine-specific `config/odor-sensing.rpi5.toml` currently selects:
 
@@ -258,6 +261,7 @@ The machine-specific `config/odor-sensing.rpi5.toml` currently selects:
 - GPIO controller `/dev/gpiochip4`, expected label `pinctrl-rp1`
 - ADS START GPIO line `17`, active high
 - ADS DRDY# GPIO line `27`, active low
+- ADS START/SYNC held low; conversions use serial START commands.
 
 `config/odor-sensing.rpi5-tgs-only.toml` uses the same ADS/SPI/GPIO settings
 but disables SGP41, BME690, both MCP3421 devices, and SHT45 for the current

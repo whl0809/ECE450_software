@@ -1,4 +1,5 @@
 #include <cmath>
+#include <chrono>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -108,7 +109,7 @@ void queueAdsBeginWithId(odor::hardware::mock::MockSPIDevice& spi, uint8_t devic
     spi.queueRxData({0x00, 0x00, deviceIdRegister});
     queueAdsRegisterCheck(spi, 0x00);
     queueAdsRegisterCheck(spi, 0x14);
-    queueAdsRegisterCheck(spi, 0x00);
+    queueAdsRegisterCheck(spi, 0x3A);
 }
 
 void queueAdsBegin(odor::hardware::mock::MockSPIDevice& spi)
@@ -208,37 +209,38 @@ int main()
         spi.queueRxData({});
         spi.queueRxData({0x00, 0x00, 0xA5, 0x80, 0x01, 0x00});
         odor::hardware::mock::MockGpioLine start(true);
-        odor::ADS114S06Driver driver(spi, nullptr, &start, {true, false, true, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::ADS114S06Driver driver(spi, nullptr, &start, {true, false, true, true, false, 2.5F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
         driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
             events.push_back(event);
         });
         const odor::OperationResult result = driver.runResetRegisterSnapshotDiagnostic();
         expect(result.ok);
-        expect(events.size() == 3U);
+        expect(events.size() == 2U);
         bool startValue = false;
         expect(start.read(startValue).ok);
-        expect(startValue);
-        expect(events[0].stage == "diagnostic_reset_snapshot_start_line_high");
-        expect(events[1].stage == "reset_command");
-        expect(events[1].txBytes == std::vector<uint8_t>({0x06}));
-        expect(events[2].stage == "reset_register_snapshot_rreg");
-        expect(events[2].txBytes == std::vector<uint8_t>({0x20, 0x03, 0x00, 0x00, 0x00, 0x00}));
-        expect(events[2].rxBytes == std::vector<uint8_t>({0x00, 0x00, 0xA5, 0x80, 0x01, 0x00}));
-        expect(events[2].extractedRegisterBytes == std::vector<uint8_t>({0xA5, 0x80, 0x01, 0x00}));
-        expect(events[2].hasComparison);
-        expect(events[2].readbackMask == 0x07);
-        expect(events[2].requestedWriteValue == 0x05);
-        expect(events[2].extractedReadbackValue == 0xA5);
-        expect(events[2].maskedExpected == 0x05);
-        expect(events[2].maskedActual == 0x05);
+        expect(!startValue);
+        expect(!start.wasEverWrittenHigh());
+        expect(start.writeCount() == 1U);
+        expect(events[0].stage == "reset_command");
+        expect(events[0].txBytes == std::vector<uint8_t>({0x06}));
+        expect(events[1].stage == "reset_register_snapshot_rreg");
+        expect(events[1].txBytes == std::vector<uint8_t>({0x20, 0x03, 0x00, 0x00, 0x00, 0x00}));
+        expect(events[1].rxBytes == std::vector<uint8_t>({0x00, 0x00, 0xA5, 0x80, 0x01, 0x00}));
+        expect(events[1].extractedRegisterBytes == std::vector<uint8_t>({0xA5, 0x80, 0x01, 0x00}));
+        expect(events[1].hasComparison);
+        expect(events[1].readbackMask == 0x07);
+        expect(events[1].requestedWriteValue == 0x05);
+        expect(events[1].extractedReadbackValue == 0xA5);
+        expect(events[1].maskedExpected == 0x05);
+        expect(events[1].maskedActual == 0x05);
     }
 
     {
         odor::hardware::mock::MockSPIDevice spi(true);
         spi.queueRxData({});
         spi.queueRxData({0x00, 0x00, 0xA5, 0x00, 0x00, 0x01});
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
         driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
             events.push_back(event);
@@ -255,7 +257,7 @@ int main()
         odor::hardware::mock::MockSPIDevice spi(true);
         spi.queueRxData({});
         spi.queueRxData({0x00, 0x00, 0xFF, 0x80, 0x01, 0x00});
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
         driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
             events.push_back(event);
@@ -277,13 +279,18 @@ int main()
                 static_cast<uint8_t>((odor::config::TgsChannels[i].ads114s06Ain << 4U) | 0x0CU);
             queueAdsChannelRead(spi, muxValue, 0x1234);
         }
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::hardware::mock::MockGpioLine start(true);
+        odor::ADS114S06Driver driver(spi, nullptr, &start, {true, false, true, true, false, 2.5F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
         driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
             events.push_back(event);
         });
-        expect(driver.begin().ok);
-        expect(events.size() >= 8U);
+        const auto beginStarted = std::chrono::steady_clock::now();
+        const odor::OperationResult beginResult = driver.begin();
+        const auto beginElapsed = std::chrono::steady_clock::now() - beginStarted;
+        expect(beginResult.ok);
+        expect(beginElapsed >= std::chrono::milliseconds(10));
+        expect(events.size() >= 11U);
         expect(events[0].stage == "device_id_read_rreg");
         expect(events[0].txBytes == std::vector<uint8_t>({0x20, 0x00, 0x00}));
         expect(!events[0].hasComparison);
@@ -299,17 +306,44 @@ int main()
         expect(events[3].txBytes == std::vector<uint8_t>({0x23, 0x00, 0x00}));
         expect(!events[3].hasComparison);
         expect(events[4].maskedExpected == events[4].maskedActual);
+        bool sawRefWrite = false;
+        bool sawRefRead = false;
+        bool sawRefCompare = false;
+        for (const auto& event : events) {
+            sawRefWrite = sawRefWrite || event.txBytes == std::vector<uint8_t>({0x45, 0x00, 0x3A});
+            sawRefRead = sawRefRead || event.txBytes == std::vector<uint8_t>({0x25, 0x00, 0x00});
+            if (event.stage == "register_0x5_masked_compare") {
+                sawRefCompare = event.readbackMask == 0xFF &&
+                                event.requestedWriteValue == 0x3A &&
+                                event.extractedReadbackValue == 0x3A &&
+                                event.maskedExpected == 0x3A &&
+                                event.maskedActual == 0x3A;
+            }
+        }
+        expect(sawRefWrite);
+        expect(sawRefRead);
+        expect(sawRefCompare);
         odor::TgsArrayMeasurement measurement;
         expect(driver.readTgsArray(measurement).ok);
+        bool startValue = true;
+        expect(start.read(startValue).ok);
+        expect(!startValue);
+        expect(!start.wasEverWrittenHigh());
+        expect(start.writeCount() >= 7U);
+        bool sawSerialStart = false;
+        for (const auto& tx : spi.txHistory()) {
+            sawSerialStart = sawSerialStart || tx == std::vector<uint8_t>({0x08});
+        }
+        expect(sawSerialStart);
         expect(measurement.valid);
         expect(measurement.adcRaw[0] == 0x1234);
-        expect(measurement.voltageV[0] > 0.58F && measurement.voltageV[0] < 0.59F);
+        expect(measurement.voltageV[0] > 0.35F && measurement.voltageV[0] < 0.36F);
     }
 
     {
         odor::hardware::mock::MockSPIDevice spi(true);
         spi.queueRxData({0x00, 0x00, 0xFF});
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
         driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
             events.push_back(event);
@@ -331,7 +365,7 @@ int main()
         for (uint8_t idRegister : idsWithMatchingLowBits) {
             odor::hardware::mock::MockSPIDevice spi(true);
             queueAdsBeginWithId(spi, idRegister);
-            odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+            odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
             std::vector<odor::ADS114S06DiagnosticEvent> events;
             driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
                 events.push_back(event);
@@ -352,7 +386,7 @@ int main()
         odor::hardware::mock::MockSPIDevice spi(true);
         spi.queueRxData({0x00, 0x00, 0x05});
         queueAdsRegisterCheck(spi, 0x01);
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
         std::vector<odor::ADS114S06DiagnosticEvent> events;
         driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
             events.push_back(event);
@@ -383,7 +417,7 @@ int main()
             spi.queueRxData({});
         }
         drdy.setPersistentWaitResult(odor::hardware::HardwareResult::failure(-110, "timeout"));
-        odor::ADS114S06Driver driver(spi, &drdy, {true, true, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::ADS114S06Driver driver(spi, &drdy, {true, true, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
         expect(driver.begin().ok);
         odor::TgsArrayMeasurement measurement;
         expect(!driver.readTgsArray(measurement).ok);
@@ -399,7 +433,7 @@ int main()
                 static_cast<uint8_t>((odor::config::TgsChannels[i].ads114s06Ain << 4U) | 0x0CU);
             queueAdsChannelRead(spi, muxValue, -256);
         }
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 4.096F, odor::config::Ads114s06Defaults});
+        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
         expect(driver.begin().ok);
         odor::TgsArrayMeasurement measurement;
         expect(driver.readTgsArray(measurement).ok);

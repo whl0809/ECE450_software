@@ -30,6 +30,7 @@ HardwareResult MockSPIDevice::transfer(const std::vector<uint8_t>& txBytes,
         return failure;
     }
     lastTx_ = txBytes;
+    txHistory_.push_back(txBytes);
     if (!queuedRxData_.empty()) {
         rxBytes = queuedRxData_.front();
         queuedRxData_.pop_front();
@@ -64,6 +65,11 @@ void MockSPIDevice::failNextTransfer(int errorCode, std::string message)
 const std::vector<uint8_t>& MockSPIDevice::lastTx() const
 {
     return lastTx_;
+}
+
+const std::vector<std::vector<uint8_t>>& MockSPIDevice::txHistory() const
+{
+    return txHistory_;
 }
 
 bool MockSPIDevice::consumeFailure(HardwareResult& result)

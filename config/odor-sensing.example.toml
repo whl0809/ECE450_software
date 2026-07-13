@@ -108,7 +108,7 @@ mode = 1
 # bits_per_word = 8
 # max_speed_hz remains provisional until verified against wiring and datasheet timing.
 max_speed_hz = 1000000
-reference_voltage_v = 4.096
+reference_voltage_v = 2.5
 pga_gain = 1
 data_rate_code = "PROVISIONAL_RUNTIME_CONFIG_REQUIRED"
 filter_code = "PROVISIONAL_RUNTIME_CONFIG_REQUIRED"

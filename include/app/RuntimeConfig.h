@@ -33,6 +33,7 @@ struct RuntimeConfig {
     uint8_t adsSpiMode = 1;
     uint8_t adsBitsPerWord = 8;
     uint32_t adsMaxSpeedHz = 1000000;
+    float adsReferenceVoltageV = config::Ads114s06ReferenceVoltageV;
     config::Ads114s06PgaGain adsPgaGain = config::Ads114s06PgaGain::X1;
     uint8_t adsDataRateCode = config::Ads114s06Defaults.dataRateCode;
     uint8_t adsFilterCode = config::Ads114s06Defaults.filterCode;

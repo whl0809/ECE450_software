@@ -21,7 +21,7 @@ The sensor-acquisition scaffold is already implemented and host-validated:
 - SHT45, SGP41, BME690, MCP3421, and ADS114S06 protocol logic exists.
 - BME690 behavior follows Bosch's official BME690/BME69x SensorAPI flow.
 - ADS114S06 register configuration follows the TI ADS114S06 datasheet and uses SPI mode 1.
-- ADS114S06 software now asserts the configured START GPIO line high before ADS reset-snapshot diagnostics, initialization, and conversion starts; this is host/mock-validated only and does not prove hardware communication.
+- ADS114S06 software selects the internal 2.5 V reference with reference input buffers disabled, keeps physical START/SYNC low, and controls conversions with serial START/STOP commands; this is host/mock-validated only and does not prove hardware communication.
 - Mock-based driver tests exist.
 - A stable versioned raw `SensorFrame` and CSV schema exist.
 - Windows/MinGW CMake builds and tests have passed.
@@ -137,6 +137,8 @@ IOVDD   -> 3.3 V
 REFP0   -> external 4.096 V reference from REF5040AIDR
 REFN0   -> AGND
 ```
+
+The current software profile does not select the external REF5040 path. It uses the ADS114S06 internal 2.5 V reference and keeps REFP/REFN input buffers disabled.
 
 The ADC is the sole active device on its physical SPI data lines. Do not add an ADS chip-select GPIO. A Raspberry Pi CE line may be needed only to expose a `spidev` node and may remain physically unconnected.
 
@@ -321,7 +323,7 @@ Keep all three runtime-configurable. Retain signed raw code and differential vol
 Confirmed and initial settings:
 
 ```text
-reference   -> external 4.096 V
+reference   -> internal 2.5 V, REFP/REFN input buffers disabled
 SPI device  -> /dev/spidev0.0 for this Pi
 SPI mode    -> mode 1
 SPI clock   -> 1 MHz provisional
@@ -330,6 +332,7 @@ START       -> line 17, active high
 DRDY#       -> line 27, active low
 PGA         -> x1 provisional
 channels    -> confirmed AIN0-AIN5 mapping
+conversion  -> physical START/SYNC held low; serial START/STOP commands used
 ```
 
 Keep clock, PGA, data rate, digital filter, DRDY use, channel settling, and conversion sequencing configurable. Retain signed raw code and ADC input voltage only.
