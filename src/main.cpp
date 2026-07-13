@@ -140,6 +140,17 @@ void printAdsDiagnosticEvent(const odor::ADS114S06DiagnosticEvent& event)
                       << std::dec;
         }
     }
+    if (event.hasChannel) {
+        std::cout << ",channel=" << event.channelIndex
+                  << ",ain=" << static_cast<int>(event.adsAin)
+                  << ",inpmux=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                  << static_cast<int>(event.inpmuxValue)
+                  << std::dec;
+    }
+    if (event.hasSample) {
+        std::cout << ",raw=" << event.rawCode
+                  << ",voltage_v=" << event.voltageV;
+    }
     if (event.hasComparison) {
         std::cout << ",requested=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
                   << static_cast<int>(event.requestedWriteValue)

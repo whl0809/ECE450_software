@@ -5,6 +5,7 @@
 #include "config.h"
 #include "sensor_types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -28,6 +29,13 @@ struct ADS114S06DiagnosticEvent {
     std::vector<uint8_t> txBytes;
     std::vector<uint8_t> rxBytes;
     std::vector<uint8_t> extractedRegisterBytes;
+    bool hasChannel = false;
+    size_t channelIndex = 0;
+    uint8_t adsAin = 0;
+    uint8_t inpmuxValue = 0;
+    bool hasSample = false;
+    int32_t rawCode = 0;
+    float voltageV = 0.0F;
     bool hasComparison = false;
     uint8_t requestedWriteValue = 0;
     uint8_t extractedReadbackValue = 0;
@@ -71,7 +79,11 @@ private:
     OperationResult selectChannel(uint8_t ain);
     OperationResult startConversion();
     OperationResult waitForReady();
-    OperationResult readSample(int32_t& rawCode);
+    OperationResult readSample(size_t channelIndex,
+                               uint8_t ain,
+                               uint8_t inpmuxValue,
+                               int32_t& rawCode,
+                               float& voltageV);
     uint8_t pgaRegisterValue() const;
     uint8_t dataRateRegisterValue() const;
     uint8_t verificationMaskFor(uint8_t reg) const;

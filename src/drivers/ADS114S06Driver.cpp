@@ -31,6 +31,8 @@ constexpr uint8_t AdsDeviceIdMask = 0x07;
 constexpr uint8_t Ads114S06DeviceIdExpected = 0x05;
 constexpr uint8_t AdsRefInternalAlwaysOn = 0x3A;
 constexpr std::chrono::milliseconds AdsInternalReferenceSettleTime{10};
+constexpr std::chrono::milliseconds AdsChannelSettleTime{80};
+constexpr std::chrono::milliseconds AdsMinimumDrdyTimeout{120};
 
 float adsGainValue(config::Ads114s06PgaGain gain)
 {
@@ -129,6 +131,12 @@ OperationResult ADS114S06Driver::begin()
         return result;
     }
 
+    result = startConversion();
+    if (!result.ok) {
+        status_ = {true, false, result.errorFlags};
+        return result;
+    }
+
     status_ = {true, true, 0};
     return {true, 0};
 }
@@ -150,35 +158,25 @@ OperationResult ADS114S06Driver::readTgsArray(TgsArrayMeasurement& measurement)
     bool anyValid = false;
     for (size_t i = 0; i < config::TgsChannelCount; ++i) {
         const uint8_t ain = config::TgsChannels[i].ads114s06Ain;
+        const uint8_t inpmuxValue = static_cast<uint8_t>((ain << 4U) | AdsAincom);
         OperationResult result = selectChannel(ain);
         if (!result.ok) {
             errors |= result.errorFlags;
             continue;
         }
 
-        result = startConversion();
-        if (!result.ok) {
-            errors |= result.errorFlags;
-            continue;
-        }
-
-        result = waitForReady();
-        if (!result.ok) {
-            errors |= result.errorFlags;
-            continue;
-        }
+        std::this_thread::sleep_for(AdsChannelSettleTime);
 
         int32_t rawCode = RawAdcUnavailable;
-        result = readSample(rawCode);
+        float voltageV = 0.0F;
+        result = readSample(i, ain, inpmuxValue, rawCode, voltageV);
         if (!result.ok) {
             errors |= result.errorFlags;
             continue;
         }
 
         measurement.adcRaw[i] = rawCode;
-        measurement.voltageV[i] =
-            (static_cast<float>(rawCode) / 32768.0F) *
-            (config_.referenceVoltageV / adsGainValue(config_.runtime.pgaGain));
+        measurement.voltageV[i] = voltageV;
         measurement.channelFresh[i] = true;
         anyValid = true;
         if (rawCode == 32767 || rawCode == -32768) {
@@ -474,16 +472,18 @@ OperationResult ADS114S06Driver::startConversion()
     }
 
     std::vector<uint8_t> ignored;
-    const hardware::HardwareResult result = spiDevice_.transfer({AdsCommandStart}, ignored);
+    const std::vector<uint8_t> tx = {AdsCommandStart};
+    const hardware::HardwareResult result = spiDevice_.transfer(tx, ignored);
+    ADS114S06DiagnosticEvent event;
+    event.stage = "start_conversion";
+    event.txBytes = tx;
+    event.rxBytes = ignored;
     if (!result.ok) {
-        ADS114S06DiagnosticEvent event;
-        event.stage = "start_conversion";
-        event.txBytes = {AdsCommandStart};
-        event.rxBytes = ignored;
         event.errorFlags = spiError().errorFlags;
         emitDiagnostic(event);
         return spiError();
     }
+    emitDiagnostic(event);
     return {true, 0};
 }
 
@@ -495,9 +495,27 @@ OperationResult ADS114S06Driver::waitForReady()
     if (drdyLine_ == nullptr || !drdyLine_->isConfigured()) {
         return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
     }
-    const hardware::HardwareResult result =
-        drdyLine_->waitForEdge(hardware::GpioEdge::Falling, config_.runtime.conversionTimeout);
-    if (!result.ok) {
+
+    bool drdyLevel = true;
+    const hardware::HardwareResult levelResult = drdyLine_->read(drdyLevel);
+    if (!levelResult.ok) {
+        ADS114S06DiagnosticEvent event;
+        event.stage = "wait_for_drdy_read_level";
+        event.errorFlags = toErrorFlags(ErrorFlag::CommunicationFailure);
+        emitDiagnostic(event);
+        return {false, event.errorFlags};
+    }
+    if (!drdyLevel) {
+        return {true, 0};
+    }
+
+    const std::chrono::milliseconds timeout =
+        config_.runtime.conversionTimeout < AdsMinimumDrdyTimeout
+            ? AdsMinimumDrdyTimeout
+            : config_.runtime.conversionTimeout;
+    const hardware::HardwareResult edgeResult =
+        drdyLine_->waitForEdge(hardware::GpioEdge::Falling, timeout);
+    if (!edgeResult.ok) {
         ADS114S06DiagnosticEvent event;
         event.stage = "wait_for_drdy";
         event.errorFlags = toErrorFlags(ErrorFlag::Timeout) | toErrorFlags(ErrorFlag::NotReady);
@@ -507,27 +525,40 @@ OperationResult ADS114S06Driver::waitForReady()
     return {true, 0};
 }
 
-OperationResult ADS114S06Driver::readSample(int32_t& rawCode)
+OperationResult ADS114S06Driver::readSample(size_t channelIndex,
+                                            uint8_t ain,
+                                            uint8_t inpmuxValue,
+                                            int32_t& rawCode,
+                                            float& voltageV)
 {
     std::vector<uint8_t> rx;
-    const hardware::HardwareResult result = spiDevice_.transfer({AdsCommandRdata, 0x00, 0x00}, rx);
+    const std::vector<uint8_t> tx = {AdsCommandRdata, 0x00, 0x00};
+    const hardware::HardwareResult result = spiDevice_.transfer(tx, rx);
     ADS114S06DiagnosticEvent event;
     event.stage = "read_sample_rdata";
-    event.txBytes = {AdsCommandRdata, 0x00, 0x00};
+    event.txBytes = tx;
     event.rxBytes = rx;
+    event.hasChannel = true;
+    event.channelIndex = channelIndex;
+    event.adsAin = ain;
+    event.inpmuxValue = inpmuxValue;
     if (!result.ok) {
         event.errorFlags = spiError().errorFlags;
         emitDiagnostic(event);
         return spiError();
     }
-    if (rx.size() < 2U) {
+    if (rx.size() < 3U) {
         event.errorFlags = toErrorFlags(ErrorFlag::InvalidMeasurement);
         emitDiagnostic(event);
         return {false, event.errorFlags};
     }
 
-    const size_t offset = rx.size() - 2U;
-    rawCode = protocol::readSignedBe(rx, offset, 2);
+    rawCode = protocol::readSignedBe(rx, 1, 2);
+    voltageV = (static_cast<float>(rawCode) / 32768.0F) *
+               (config_.referenceVoltageV / adsGainValue(config_.runtime.pgaGain));
+    event.hasSample = true;
+    event.rawCode = rawCode;
+    event.voltageV = voltageV;
     emitDiagnostic(event);
     return {true, 0};
 }
