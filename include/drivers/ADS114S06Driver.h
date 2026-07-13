@@ -28,7 +28,6 @@ struct ADS114S06DiagnosticEvent {
     uint8_t registerAddress = 0;
     std::vector<uint8_t> txBytes;
     std::vector<uint8_t> rxBytes;
-    std::vector<uint8_t> extractedRegisterBytes;
     bool hasChannel = false;
     size_t channelIndex = 0;
     uint8_t adsAin = 0;
@@ -61,7 +60,7 @@ public:
     OperationResult begin();
     DriverStatus status() const;
     OperationResult readTgsArray(TgsArrayMeasurement& measurement);
-    OperationResult runResetRegisterSnapshotDiagnostic();
+    OperationResult stopConversions();
     void setDiagnosticCallback(ADS114S06DiagnosticCallback callback);
 
 private:
@@ -78,7 +77,6 @@ private:
     OperationResult configureRegisters();
     OperationResult selectChannel(uint8_t ain);
     OperationResult startConversion();
-    OperationResult waitForReady();
     OperationResult readSample(size_t channelIndex,
                                uint8_t ain,
                                uint8_t inpmuxValue,

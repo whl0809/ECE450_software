@@ -15,8 +15,8 @@ namespace odor {
 namespace {
 
 // TI ADS114S06 command and register names from the ADS114S06 datasheet.
-constexpr uint8_t AdsCommandReset = 0x06;
 constexpr uint8_t AdsCommandStart = 0x08;
+constexpr uint8_t AdsCommandStop = 0x0A;
 constexpr uint8_t AdsCommandRdata = 0x12;
 constexpr uint8_t AdsCommandRreg = 0x20;
 constexpr uint8_t AdsCommandWreg = 0x40;
@@ -32,7 +32,6 @@ constexpr uint8_t Ads114S06DeviceIdExpected = 0x05;
 constexpr uint8_t AdsRefInternalAlwaysOn = 0x3A;
 constexpr std::chrono::milliseconds AdsInternalReferenceSettleTime{10};
 constexpr std::chrono::milliseconds AdsChannelSettleTime{80};
-constexpr std::chrono::milliseconds AdsMinimumDrdyTimeout{120};
 
 float adsGainValue(config::Ads114s06PgaGain gain)
 {
@@ -194,84 +193,6 @@ OperationResult ADS114S06Driver::readTgsArray(TgsArrayMeasurement& measurement)
 void ADS114S06Driver::setDiagnosticCallback(ADS114S06DiagnosticCallback callback)
 {
     diagnosticCallback_ = std::move(callback);
-}
-
-OperationResult ADS114S06Driver::runResetRegisterSnapshotDiagnostic()
-{
-    if (!config_.spiDeviceConfigured || !spiDevice_.isConfigured()) {
-        return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
-    }
-    if (config_.startConfigured && (startLine_ == nullptr || !startLine_->isConfigured())) {
-        return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
-    }
-
-    OperationResult startResult = holdStartLineLow("diagnostic_reset_snapshot");
-    if (!startResult.ok) {
-        return startResult;
-    }
-
-    std::vector<uint8_t> resetRx;
-    const std::vector<uint8_t> resetTx = {AdsCommandReset};
-    hardware::HardwareResult transferResult = spiDevice_.transfer(resetTx, resetRx);
-    ADS114S06DiagnosticEvent resetEvent;
-    resetEvent.stage = "reset_command";
-    resetEvent.txBytes = resetTx;
-    resetEvent.rxBytes = resetRx;
-    if (!transferResult.ok) {
-        resetEvent.errorFlags = spiError().errorFlags;
-        emitDiagnostic(resetEvent);
-        return spiError();
-    }
-    emitDiagnostic(resetEvent);
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-
-    std::vector<uint8_t> snapshotRx;
-    const std::vector<uint8_t> snapshotTx = {
-        static_cast<uint8_t>(AdsCommandRreg | AdsRegisterId),
-        0x03,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-    };
-    transferResult = spiDevice_.transfer(snapshotTx, snapshotRx);
-
-    ADS114S06DiagnosticEvent snapshotEvent;
-    snapshotEvent.stage = "reset_register_snapshot_rreg";
-    snapshotEvent.registerAddress = AdsRegisterId;
-    snapshotEvent.txBytes = snapshotTx;
-    snapshotEvent.rxBytes = snapshotRx;
-    if (!transferResult.ok) {
-        snapshotEvent.errorFlags = spiError().errorFlags;
-        emitDiagnostic(snapshotEvent);
-        return spiError();
-    }
-    if (snapshotRx.size() < 4U) {
-        snapshotEvent.errorFlags = toErrorFlags(ErrorFlag::InvalidMeasurement);
-        emitDiagnostic(snapshotEvent);
-        return {false, snapshotEvent.errorFlags};
-    }
-
-    const size_t registerOffset = snapshotRx.size() - 4U;
-    snapshotEvent.extractedRegisterBytes.assign(snapshotRx.begin() + static_cast<std::vector<uint8_t>::difference_type>(registerOffset),
-                                                snapshotRx.end());
-    const uint8_t idRegister = snapshotEvent.extractedRegisterBytes[0];
-    snapshotEvent.hasComparison = true;
-    snapshotEvent.requestedWriteValue = Ads114S06DeviceIdExpected;
-    snapshotEvent.extractedReadbackValue = idRegister;
-    snapshotEvent.readbackMask = AdsDeviceIdMask;
-    snapshotEvent.maskedExpected = static_cast<uint8_t>(Ads114S06DeviceIdExpected & AdsDeviceIdMask);
-    snapshotEvent.maskedActual = static_cast<uint8_t>(idRegister & AdsDeviceIdMask);
-    if (snapshotEvent.maskedActual != snapshotEvent.maskedExpected) {
-        snapshotEvent.errorFlags = toErrorFlags(ErrorFlag::DeviceNotDetected) |
-                                   toErrorFlags(ErrorFlag::CommunicationFailure);
-        emitDiagnostic(snapshotEvent);
-        return {false, snapshotEvent.errorFlags};
-    }
-
-    emitDiagnostic(snapshotEvent);
-    return {true, 0};
 }
 
 OperationResult ADS114S06Driver::holdStartLineLow(const std::string& stage)
@@ -487,41 +408,24 @@ OperationResult ADS114S06Driver::startConversion()
     return {true, 0};
 }
 
-OperationResult ADS114S06Driver::waitForReady()
+OperationResult ADS114S06Driver::stopConversions()
 {
-    if (!config_.drdyConfigured || !config_.runtime.waitForDrdyWhenConfigured) {
-        return {true, 0};
-    }
-    if (drdyLine_ == nullptr || !drdyLine_->isConfigured()) {
+    if (!config_.spiDeviceConfigured || !spiDevice_.isConfigured()) {
         return {false, toErrorFlags(ErrorFlag::DeviceNotConfigured)};
     }
-
-    bool drdyLevel = true;
-    const hardware::HardwareResult levelResult = drdyLine_->read(drdyLevel);
-    if (!levelResult.ok) {
-        ADS114S06DiagnosticEvent event;
-        event.stage = "wait_for_drdy_read_level";
-        event.errorFlags = toErrorFlags(ErrorFlag::CommunicationFailure);
+    std::vector<uint8_t> rx;
+    const std::vector<uint8_t> tx = {AdsCommandStop};
+    const hardware::HardwareResult result = spiDevice_.transfer(tx, rx);
+    ADS114S06DiagnosticEvent event;
+    event.stage = "stop_conversion";
+    event.txBytes = tx;
+    event.rxBytes = rx;
+    if (!result.ok) {
+        event.errorFlags = spiError().errorFlags;
         emitDiagnostic(event);
-        return {false, event.errorFlags};
+        return spiError();
     }
-    if (!drdyLevel) {
-        return {true, 0};
-    }
-
-    const std::chrono::milliseconds timeout =
-        config_.runtime.conversionTimeout < AdsMinimumDrdyTimeout
-            ? AdsMinimumDrdyTimeout
-            : config_.runtime.conversionTimeout;
-    const hardware::HardwareResult edgeResult =
-        drdyLine_->waitForEdge(hardware::GpioEdge::Falling, timeout);
-    if (!edgeResult.ok) {
-        ADS114S06DiagnosticEvent event;
-        event.stage = "wait_for_drdy";
-        event.errorFlags = toErrorFlags(ErrorFlag::Timeout) | toErrorFlags(ErrorFlag::NotReady);
-        emitDiagnostic(event);
-        return {false, event.errorFlags};
-    }
+    emitDiagnostic(event);
     return {true, 0};
 }
 

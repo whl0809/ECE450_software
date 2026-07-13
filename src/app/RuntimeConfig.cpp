@@ -146,8 +146,6 @@ void setKnownValue(RuntimeConfig& config,
         config.adsFilterCode = static_cast<uint8_t>(parseUint(value));
     } else if (section == "ads114s06.spi" && key == "verify_register_readback") {
         config.adsVerifyRegisterReadback = parseBool(value);
-    } else if (section == "ads114s06.spi" && key == "wait_for_drdy_when_configured") {
-        config.adsWaitForDrdy = parseBool(value);
     } else if (section == "ads114s06.gpio" && key == "gpiochip") {
         config.gpioChipPath = unquote(value);
     } else if (section == "ads114s06.gpio" && key == "expected_label") {
@@ -162,6 +160,12 @@ void setKnownValue(RuntimeConfig& config,
         config.adsDrdy.configured = true;
     } else if (section == "ads114s06.gpio" && key == "drdy_active_low") {
         config.adsDrdy.activeLow = parseBool(value);
+    } else if (section == "logging.raw_csv" && key == "enabled") {
+        config.rawCsvEnabled = parseBool(value);
+    } else if (section == "logging.raw_csv" && (key == "output_directory" || key == "output_path")) {
+        config.rawCsvOutputDirectory = unquote(value);
+    } else if (section == "logging.raw_csv" && key == "tgs_scan_interval_ms") {
+        config.tgsScanIntervalMs = parseUint(value);
     }
 }
 
@@ -245,6 +249,10 @@ ValidationResult validateRuntimeConfigValues(const RuntimeConfig& config)
     }
     if (config.adsDrdy.configured) {
         require(config.adsDrdy.activeLow, "ADS DRDY# must be active low for this machine profile");
+    }
+    if (config.enableAds114s06 && config.rawCsvEnabled) {
+        require(!config.rawCsvOutputDirectory.empty(), "raw CSV output directory is missing");
+        require(config.tgsScanIntervalMs >= 1000U, "TGS scan interval must be at least 1000 ms");
     }
 
     if (anyI2cSensor && config.secondaryI2c.path.empty()) {

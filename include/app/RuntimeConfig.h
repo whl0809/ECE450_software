@@ -38,12 +38,15 @@ struct RuntimeConfig {
     uint8_t adsDataRateCode = config::Ads114s06Defaults.dataRateCode;
     uint8_t adsFilterCode = config::Ads114s06Defaults.filterCode;
     bool adsVerifyRegisterReadback = true;
-    bool adsWaitForDrdy = true;
 
     std::string gpioChipPath;
     std::string gpioChipExpectedLabel;
     GpioLineConfig adsStart;
     GpioLineConfig adsDrdy;
+
+    bool rawCsvEnabled = true;
+    std::string rawCsvOutputDirectory = "data";
+    uint32_t tgsScanIntervalMs = 1000;
 };
 
 struct ConfigLoadResult {

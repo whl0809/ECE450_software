@@ -2,13 +2,14 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include "app/RuntimeConfig.h"
 #include "config.h"
@@ -21,6 +22,7 @@
 #include "hardware/mock/MockI2CBus.h"
 #include "hardware/mock/MockSPIDevice.h"
 #include "services/SensorManager.h"
+#include "services/TgsCsvLogger.h"
 
 #if defined(ODOR_HAS_LINUX_HARDWARE)
 #include "app/LinuxHardwareValidation.h"
@@ -88,7 +90,6 @@ odor::config::Ads114s06RuntimeSettings adsRuntimeFrom(const odor::app::RuntimeCo
     runtime.dataRateCode = config.adsDataRateCode;
     runtime.filterCode = config.adsFilterCode;
     runtime.verifyRegisterReadback = config.adsVerifyRegisterReadback;
-    runtime.waitForDrdyWhenConfigured = config.adsWaitForDrdy;
     return runtime;
 }
 
@@ -98,69 +99,36 @@ void printDiagnosticResult(const std::string& name, const odor::OperationResult&
               << ",error_flags=" << result.errorFlags << '\n';
 }
 
-std::string bytesToHex(const std::vector<uint8_t>& bytes)
+bool isCriticalAdsRegister(uint8_t reg)
 {
-    std::ostringstream out;
-    out << '[';
-    for (size_t i = 0; i < bytes.size(); ++i) {
-        if (i != 0U) {
-            out << ' ';
-        }
-        out << "0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-            << static_cast<int>(bytes[i]);
-    }
-    out << ']';
-    return out.str();
+    return reg == 0x03U || reg == 0x04U || reg == 0x05U;
 }
 
 void printAdsDiagnosticEvent(const odor::ADS114S06DiagnosticEvent& event)
 {
-    std::cout << "ads_diag"
-              << ",stage=" << event.stage
-              << ",reg=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-              << static_cast<int>(event.registerAddress)
-              << std::dec
-              << ",tx=" << bytesToHex(event.txBytes)
-              << ",rx=" << bytesToHex(event.rxBytes);
-    if (!event.extractedRegisterBytes.empty()) {
-        std::cout << ",registers_0x00_0x03=" << bytesToHex(event.extractedRegisterBytes);
-        if (event.extractedRegisterBytes.size() >= 4U) {
-            const uint8_t status = event.extractedRegisterBytes[1];
-            const uint8_t inpmux = event.extractedRegisterBytes[2];
-            const uint8_t pga = event.extractedRegisterBytes[3];
-            std::cout << ",status_expected=0x80,status_actual=0x" << std::hex << std::uppercase
-                      << std::setw(2) << std::setfill('0') << static_cast<int>(status)
-                      << ",status_matches=" << (status == 0x80U ? "true" : "false")
-                      << ",inpmux_expected=0x01,inpmux_actual=0x" << std::setw(2)
-                      << static_cast<int>(inpmux)
-                      << ",inpmux_matches=" << (inpmux == 0x01U ? "true" : "false")
-                      << ",pga_expected=0x00,pga_actual=0x" << std::setw(2)
-                      << static_cast<int>(pga)
-                      << ",pga_matches=" << (pga == 0x00U ? "true" : "false")
-                      << std::dec;
-        }
+    if (event.stage == "device_id_verify" && event.hasComparison) {
+        std::cout << "ads_diag,check=device_id"
+                  << ",ok=" << (event.errorFlags == 0U ? "true" : "false")
+                  << ",mask=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                  << static_cast<int>(event.readbackMask)
+                  << ",expected=0x" << std::setw(2) << static_cast<int>(event.maskedExpected)
+                  << ",actual=0x" << std::setw(2) << static_cast<int>(event.maskedActual)
+                  << std::dec
+                  << ",error_flags=" << event.errorFlags << '\n';
+    } else if (event.hasComparison && isCriticalAdsRegister(event.registerAddress)) {
+        std::cout << "ads_diag,check=register_readback"
+                  << ",reg=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
+                  << static_cast<int>(event.registerAddress)
+                  << ",expected=0x" << std::setw(2) << static_cast<int>(event.maskedExpected)
+                  << ",actual=0x" << std::setw(2) << static_cast<int>(event.maskedActual)
+                  << std::dec
+                  << ",ok=" << (event.errorFlags == 0U ? "true" : "false")
+                  << ",error_flags=" << event.errorFlags << '\n';
+    } else if (event.stage == "start_conversion") {
+        std::cout << "ads_diag,check=serial_start"
+                  << ",ok=" << (event.errorFlags == 0U ? "true" : "false")
+                  << ",error_flags=" << event.errorFlags << '\n';
     }
-    if (event.hasChannel) {
-        std::cout << ",channel=" << event.channelIndex
-                  << ",ain=" << static_cast<int>(event.adsAin)
-                  << ",inpmux=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-                  << static_cast<int>(event.inpmuxValue)
-                  << std::dec;
-    }
-    if (event.hasSample) {
-        std::cout << ",raw=" << event.rawCode
-                  << ",voltage_v=" << event.voltageV;
-    }
-    if (event.hasComparison) {
-        std::cout << ",requested=0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-                  << static_cast<int>(event.requestedWriteValue)
-                  << ",readback=0x" << std::setw(2) << static_cast<int>(event.extractedReadbackValue)
-                  << ",mask=0x" << std::setw(2) << static_cast<int>(event.readbackMask)
-                  << ",masked_expected=0x" << std::setw(2) << static_cast<int>(event.maskedExpected)
-                  << ",masked_actual=0x" << std::setw(2) << static_cast<int>(event.maskedActual)
-                  << std::dec;
-    }
-    std::cout << ",error_flags=" << event.errorFlags << '\n';
 }
 
 int runMockApplication()
@@ -229,8 +197,10 @@ int runHardwareDiagnostic(odor::hardware::II2CBus& primaryI2c,
                                adsRuntime});
 
     int failures = 0;
+    odor::ErrorFlags diagnosticErrors = 0;
     auto record = [&](const std::string& name, const odor::OperationResult& result) {
         printDiagnosticResult(name, result);
+        diagnosticErrors |= result.errorFlags;
         if (!result.ok) {
             ++failures;
         }
@@ -273,13 +243,135 @@ int runHardwareDiagnostic(odor::hardware::II2CBus& primaryI2c,
 
     if (config.enableAds114s06) {
         ads.setDiagnosticCallback(printAdsDiagnosticEvent);
-        record("ads114s06_reset_register_snapshot", ads.runResetRegisterSnapshotDiagnostic());
         record("ads114s06_begin", ads.begin());
         odor::TgsArrayMeasurement tgsMeasurement;
-        record("ads114s06_read_tgs_array", ads.readTgsArray(tgsMeasurement));
+        const odor::OperationResult tgsResult = ads.readTgsArray(tgsMeasurement);
+        record("ads114s06_read_tgs_array", tgsResult);
+        std::cout << "ads_diag,check=six_channel_scan"
+                  << ",ok=" << (tgsResult.ok ? "true" : "false");
+        for (size_t i = 0; i < odor::config::TgsChannelCount; ++i) {
+            std::cout << ",tgs" << i << "_raw=";
+            if (tgsMeasurement.channelFresh[i]) {
+                std::cout << tgsMeasurement.adcRaw[i];
+            }
+            std::cout << ",tgs" << i << "_voltage_v=";
+            if (tgsMeasurement.channelFresh[i]) {
+                std::cout << tgsMeasurement.voltageV[i];
+            }
+        }
+        std::cout << ",error_flags=" << tgsMeasurement.errorFlags << '\n';
+        (void)ads.stopConversions();
     }
 
+    std::cout << "diagnostic,final,ok=" << (failures == 0 ? "true" : "false")
+              << ",error_flags=" << diagnosticErrors << '\n';
     return failures == 0 ? 0 : 2;
+}
+
+std::filesystem::path createTgsCsvPath(const odor::app::RuntimeConfig& config)
+{
+    const std::filesystem::path outputDir(config.rawCsvOutputDirectory);
+    std::filesystem::create_directories(outputDir);
+    return outputDir / odor::TgsCsvLogger::timestampedFilename(std::chrono::system_clock::now());
+}
+
+int runTgsRecordingApplication(odor::hardware::ISPIDevice& adsSpi,
+                               odor::hardware::IGpioLine& adsDrdy,
+                               odor::hardware::IGpioLine& adsStart,
+                               const odor::app::RuntimeConfig& config)
+{
+    const odor::config::Ads114s06RuntimeSettings adsRuntime = adsRuntimeFrom(config);
+    odor::ADS114S06Driver ads(adsSpi,
+                              &adsDrdy,
+                              &adsStart,
+                              {true,
+                               config.adsDrdy.configured,
+                               config.adsStart.configured,
+                               odor::config::Ads114s06ChipSelectPermanentlyAsserted,
+                               odor::config::Ads114s06ResetControlledByRaspberryPi,
+                               config.adsReferenceVoltageV,
+                               adsRuntime});
+
+    const odor::OperationResult beginResult = ads.begin();
+    std::cout << "ADS114S06 initialization: " << initializationStatusText(beginResult)
+              << ",error_flags=" << beginResult.errorFlags << '\n';
+    if (!beginResult.ok) {
+        return 2;
+    }
+
+    std::filesystem::path csvPath;
+    std::ofstream csv;
+    if (config.rawCsvEnabled) {
+        try {
+            csvPath = createTgsCsvPath(config);
+            csv.open(csvPath, std::ios::out | std::ios::trunc);
+        } catch (const std::exception& ex) {
+            std::cerr << "error: unable to create TGS CSV output: " << ex.what() << '\n';
+            (void)ads.stopConversions();
+            return 1;
+        }
+        if (!csv) {
+            std::cerr << "error: unable to open TGS CSV output: " << csvPath.string() << '\n';
+            (void)ads.stopConversions();
+            return 1;
+        }
+        odor::TgsCsvLogger::writeHeader(csv);
+        std::cout << "TGS CSV: " << csvPath.string() << '\n';
+    } else {
+        std::cout << "TGS CSV: disabled by runtime configuration\n";
+    }
+
+    const auto scanInterval = std::chrono::milliseconds(config.tgsScanIntervalMs);
+    const auto recordingStart = std::chrono::steady_clock::now();
+    auto nextScan = recordingStart;
+    size_t scanCount = 0;
+    odor::ErrorFlags lastErrorFlags = 0;
+
+    while (!shutdownRequested.load()) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextScan) {
+            odor::TgsArrayMeasurement measurement;
+            const odor::OperationResult result = ads.readTgsArray(measurement);
+            if (measurement.monotonicTimestamp == std::chrono::steady_clock::time_point{}) {
+                measurement.monotonicTimestamp = std::chrono::steady_clock::now();
+            }
+            if (measurement.wallTimestamp == std::chrono::system_clock::time_point{}) {
+                measurement.wallTimestamp = std::chrono::system_clock::now();
+            }
+            lastErrorFlags = measurement.errorFlags;
+            if (csv) {
+                odor::TgsCsvLogger::writeScan(csv, measurement, recordingStart);
+            }
+            ++scanCount;
+            if (scanCount == 1U || (scanCount % 10U) == 0U || !result.ok) {
+                std::cout << "status,tgs_scans=" << scanCount
+                          << ",last_ok=" << (result.ok ? "true" : "false")
+                          << ",error_flags=" << measurement.errorFlags << '\n';
+            }
+            if (csv && (scanCount % 10U) == 0U) {
+                csv.flush();
+            }
+            nextScan += scanInterval;
+            if (nextScan <= std::chrono::steady_clock::now()) {
+                nextScan = std::chrono::steady_clock::now() + scanInterval;
+            }
+        }
+        const auto sleepUntil = std::min(nextScan, std::chrono::steady_clock::now() + std::chrono::milliseconds(100));
+        std::this_thread::sleep_until(sleepUntil);
+    }
+
+    const odor::OperationResult stopResult = ads.stopConversions();
+    if (csv) {
+        csv.flush();
+        csv.close();
+    }
+    std::cout << "recording_stopped"
+              << ",path=" << (csvPath.empty() ? "" : csvPath.string())
+              << ",scans=" << scanCount
+              << ",last_error_flags=" << lastErrorFlags
+              << ",stop_ok=" << (stopResult.ok ? "true" : "false")
+              << ",stop_error_flags=" << stopResult.errorFlags << '\n';
+    return 0;
 }
 
 int runLinuxApplication(const odor::app::RuntimeConfig& config, bool diagnostic)
@@ -372,6 +464,7 @@ int runLinuxApplication(const odor::app::RuntimeConfig& config, bool diagnostic)
         if (diagnostic) {
             return runHardwareDiagnostic(*primaryBus, *h2sBus, *adsSpiDevice, *adsDrdyLine, *adsStart, config);
         }
+        return runTgsRecordingApplication(*adsSpiDevice, *adsDrdyLine, *adsStart, config);
     }
 
     odor::SensorManagerRuntimeProfile profile;

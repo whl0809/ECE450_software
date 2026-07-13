@@ -114,7 +114,6 @@ data_rate_code = "PROVISIONAL_RUNTIME_CONFIG_REQUIRED"
 filter_code = "PROVISIONAL_RUNTIME_CONFIG_REQUIRED"
 conversion_mode = "single_shot_per_channel"
 verify_register_readback = true
-wait_for_drdy_when_configured = true
 output = "signed_raw_code_and_adc_input_voltage_only"
 cs_behavior = "permanently_asserted_on_board"
 reset_behavior = "tied_to_iovdd_on_board"
@@ -136,4 +135,5 @@ do_not_parallel_pi_power_rails = true
 [logging.raw_csv]
 enabled = false
 schema_version = 1
-# output_path = "UNCONFIGURED"
+# output_directory = "UNCONFIGURED"
+tgs_scan_interval_ms = 1000

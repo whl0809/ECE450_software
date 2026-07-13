@@ -25,6 +25,7 @@ add_library(odor_core
     src/protocol/ProtocolUtils.cpp
     src/services/RawCsvLogger.cpp
     src/services/SensorManager.cpp
+    src/services/TgsCsvLogger.cpp
 )
 
 target_include_directories(odor_core PUBLIC include)

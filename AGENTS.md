@@ -32,14 +32,7 @@ This does **not** mean the system is hardware-verified.
 
 This specific Raspberry Pi 5 has now been inspected. The initial Linux device paths, GPIO controller, and Pi-to-board signal assignments are selected and may be used in a machine-specific runtime configuration.
 
-Pi-native diagnostic execution has occurred with only the ADS114S06/TGS PCB connected. The observed ADS diagnostic result before the current debug-instrumentation update was:
-
-```text
-diagnostic,ads114s06_begin,ok=false,error_flags=10240
-diagnostic,ads114s06_read_tgs_array,ok=false,error_flags=10241
-```
-
-At that time, Linux SPI transfers reported success, but ADS114S06 initialization stopped during register readback verification in `ADS114S06Driver::writeRegisterChecked()`. This is an observed diagnostic failure, not a demonstrated root cause. Updated diagnostics must be rerun on the Raspberry Pi with the connected PCB before ADS communication, START/DRDY behavior, or six-channel TGS acquisition can be considered hardware-validated.
+Pi-native ADS114S06 bring-up has confirmed SPI mode 1 at 1 MHz, device-ID validation, critical register readback, internal 2.5 V reference selection, serial START, INPMUX channel selection, and fixed-delay RDATA reads for AIN0-AIN5 against AINCOM. Normal TGS acquisition records one complete six-channel scan per CSV row. This validates the ADS/TGS acquisition path only; it does not validate calibration, TGS gas conversion, integrated multi-sensor operation, or long-duration stability.
 
 The next phase is native build and physical-board validation:
 
@@ -47,7 +40,7 @@ The next phase is native build and physical-board validation:
 2. Build and run mock tests natively on Raspberry Pi 5.
 3. Connect both boards using the documented wiring.
 4. Confirm the five expected I2C addresses on `/dev/i2c-1`.
-5. Validate ADS114S06 SPI, START, DRDY#, register readback, and six-channel acquisition.
+5. Run ADS114S06/TGS CSV acquisition long enough to evaluate stability, saturation, noise, and disconnect behavior.
 6. Tune provisional ADC and timing parameters from real measurements.
 7. Run stable multi-sensor CSV acquisition and fault tests.
 
@@ -332,10 +325,10 @@ START       -> line 17, active high
 DRDY#       -> line 27, active low
 PGA         -> x1 provisional
 channels    -> confirmed AIN0-AIN5 mapping
-conversion  -> physical START/SYNC held low; serial START/STOP commands used
+conversion  -> physical START/SYNC held low; serial START once after configuration, 80 ms after each INPMUX change, RDATA [0x12, 0x00, 0x00], serial STOP on shutdown
 ```
 
-Keep clock, PGA, data rate, digital filter, DRDY use, channel settling, and conversion sequencing configurable. Retain signed raw code and ADC input voltage only.
+Keep clock, PGA, data rate, digital filter, scan interval, and any future conversion-sequencing changes configurable. Retain signed raw code and ADC input voltage only.
 
 ---
 

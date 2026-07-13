@@ -202,8 +202,6 @@ struct Ads114s06RuntimeSettings {
     uint8_t dataRateCode = 0x14;
     uint8_t filterCode = 0x00;
     bool verifyRegisterReadback = true;
-    bool waitForDrdyWhenConfigured = true;
-    std::chrono::milliseconds conversionTimeout{250};
 };
 
 struct RawLoggingSettings {

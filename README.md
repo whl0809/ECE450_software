@@ -222,6 +222,12 @@ Run the normal application loop with hardware enabled after validation passes:
 ./build/odor_sensing_app --config config/odor-sensing.rpi5.toml
 ```
 
+With ADS114S06 enabled, normal mode records continuous six-channel TGS scans
+to a timestamped CSV file under the configured raw CSV output directory
+(`data/` in the Raspberry Pi profiles). Stop with `Ctrl+C`; the application
+flushes and closes the CSV, sends ADS serial STOP, and prints the file path and
+scan count.
+
 Run without hardware access:
 
 ```bash
@@ -236,9 +242,10 @@ Version: scaffold-0.1
 Build: ...
 Target: Raspberry Pi 5 / Raspberry Pi OS
 Runtime configuration validated: config/odor-sensing.rpi5.toml
-Hardware access: enabled from runtime configuration
-SensorManager initialization: OK
-heartbeat,uptime_ms=1000
+spi_actual,mode=1,bits_per_word=8,max_speed_hz=1000000
+ADS114S06 initialization: OK,error_flags=0
+TGS CSV: data/tgs_timeseries_YYYYMMDD_HHMMSSZ.csv
+status,tgs_scans=1,last_ok=true,error_flags=0
 ```
 
 Stop with `Ctrl+C`.
@@ -252,6 +259,9 @@ The example TOML currently selects these provisional software defaults:
 - BME690 at `0x76` with Bosch SensorAPI-derived forced-measurement compensation and heater setup.
 - MCP3421 one-shot, 16-bit, gain x1, retaining signed raw code and differential voltage only.
 - ADS114S06 internal 2.5 V reference, fixed TGS channel mapping, and raw-code/voltage output only.
+- ADS114S06 TGS acquisition uses START/SYNC held low, serial START after
+  configuration, 80 ms after each INPMUX change, and RDATA `[0x12, 0x00,
+  0x00]` parsed from RX bytes 1 and 2.
 
 The machine-specific `config/odor-sensing.rpi5.toml` currently selects:
 
@@ -262,6 +272,7 @@ The machine-specific `config/odor-sensing.rpi5.toml` currently selects:
 - ADS START GPIO line `17`, active high
 - ADS DRDY# GPIO line `27`, active low
 - ADS START/SYNC held low; conversions use serial START commands.
+- TGS CSV output directory `data/` with a 1000 ms scan interval.
 
 `config/odor-sensing.rpi5-tgs-only.toml` uses the same ADS/SPI/GPIO settings
 but disables SGP41, BME690, both MCP3421 devices, and SHT45 for the current
@@ -274,6 +285,14 @@ wall-clock timestamps, system state, validity flags, error flags, TGS raw
 codes/voltages, NH3/H2S raw codes and differential voltages, SGP41
 `SRAW_VOC`/`SRAW_NOX`, BME690 fields/status, and SHT45 temperature/humidity.
 
+Normal ADS/TGS recording writes a smaller time-series CSV with one complete
+six-channel scan per row:
+
+```text
+timestamp_utc,elapsed_ms,
+tgs0_raw,tgs0_voltage_v,...,tgs5_raw,tgs5_voltage_v,error_flags
+```
+
 The schema intentionally does not report NH3/H2S ppm, electrochemical current,
 TGS resistance, TGS `Rs/R0`, TGS gas concentration, or odor classification as
 valid outputs.
@@ -283,7 +302,7 @@ valid outputs.
 - Connected-board validation of `/dev/i2c-1`, `/dev/spidev0.0`, `/dev/gpiochip4`, GPIO17, and GPIO27
 - Confirmation that `/dev/gpiochip4` still reports label `pinctrl-rp1` after boot
 - Confirmation of the five expected I2C addresses on `/dev/i2c-1`
-- ADS114S06 uses SPI mode 1; bit order, clock, PGA gain, data rate, filter, and conversion sequencing still need hardware validation.
+- ADS114S06 long-duration stability, noise, saturation, disconnect behavior, and calibrated TGS interpretation
 - MCP3421 gain, resolution, and conversion mode
 - Electrochemical polarity, zero offset, sensitivity, and calibration constants
 - TGS heater control requirements and per-model calibration constants

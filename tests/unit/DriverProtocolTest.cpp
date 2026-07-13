@@ -15,6 +15,7 @@
 #include "hardware/mock/MockSPIDevice.h"
 #include "protocol/ProtocolUtils.h"
 #include "services/RawCsvLogger.h"
+#include "services/TgsCsvLogger.h"
 
 namespace {
 
@@ -206,73 +207,6 @@ int main()
 
     {
         odor::hardware::mock::MockSPIDevice spi(true);
-        spi.queueRxData({});
-        spi.queueRxData({0x00, 0x00, 0xA5, 0x80, 0x01, 0x00});
-        odor::hardware::mock::MockGpioLine start(true);
-        odor::ADS114S06Driver driver(spi, nullptr, &start, {true, false, true, true, false, 2.5F, odor::config::Ads114s06Defaults});
-        std::vector<odor::ADS114S06DiagnosticEvent> events;
-        driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
-            events.push_back(event);
-        });
-        const odor::OperationResult result = driver.runResetRegisterSnapshotDiagnostic();
-        expect(result.ok);
-        expect(events.size() == 2U);
-        bool startValue = false;
-        expect(start.read(startValue).ok);
-        expect(!startValue);
-        expect(!start.wasEverWrittenHigh());
-        expect(start.writeCount() == 1U);
-        expect(events[0].stage == "reset_command");
-        expect(events[0].txBytes == std::vector<uint8_t>({0x06}));
-        expect(events[1].stage == "reset_register_snapshot_rreg");
-        expect(events[1].txBytes == std::vector<uint8_t>({0x20, 0x03, 0x00, 0x00, 0x00, 0x00}));
-        expect(events[1].rxBytes == std::vector<uint8_t>({0x00, 0x00, 0xA5, 0x80, 0x01, 0x00}));
-        expect(events[1].extractedRegisterBytes == std::vector<uint8_t>({0xA5, 0x80, 0x01, 0x00}));
-        expect(events[1].hasComparison);
-        expect(events[1].readbackMask == 0x07);
-        expect(events[1].requestedWriteValue == 0x05);
-        expect(events[1].extractedReadbackValue == 0xA5);
-        expect(events[1].maskedExpected == 0x05);
-        expect(events[1].maskedActual == 0x05);
-    }
-
-    {
-        odor::hardware::mock::MockSPIDevice spi(true);
-        spi.queueRxData({});
-        spi.queueRxData({0x00, 0x00, 0xA5, 0x00, 0x00, 0x01});
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
-        std::vector<odor::ADS114S06DiagnosticEvent> events;
-        driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
-            events.push_back(event);
-        });
-        const odor::OperationResult result = driver.runResetRegisterSnapshotDiagnostic();
-        expect(result.ok);
-        expect(events.size() == 2U);
-        expect(events[1].extractedRegisterBytes == std::vector<uint8_t>({0xA5, 0x00, 0x00, 0x01}));
-        expect(events[1].maskedActual == 0x05);
-        expect(events[1].errorFlags == 0U);
-    }
-
-    {
-        odor::hardware::mock::MockSPIDevice spi(true);
-        spi.queueRxData({});
-        spi.queueRxData({0x00, 0x00, 0xFF, 0x80, 0x01, 0x00});
-        odor::ADS114S06Driver driver(spi, {true, false, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
-        std::vector<odor::ADS114S06DiagnosticEvent> events;
-        driver.setDiagnosticCallback([&events](const odor::ADS114S06DiagnosticEvent& event) {
-            events.push_back(event);
-        });
-        const odor::OperationResult result = driver.runResetRegisterSnapshotDiagnostic();
-        expect(!result.ok);
-        expect(odor::hasError(result.errorFlags, odor::ErrorFlag::DeviceNotDetected));
-        expect(events.size() == 2U);
-        expect(events[1].extractedRegisterBytes == std::vector<uint8_t>({0xFF, 0x80, 0x01, 0x00}));
-        expect(events[1].maskedExpected == 0x05);
-        expect(events[1].maskedActual == 0x07);
-    }
-
-    {
-        odor::hardware::mock::MockSPIDevice spi(true);
         queueAdsBegin(spi);
         for (size_t i = 0; i < odor::config::TgsChannelCount; ++i) {
             const uint8_t muxValue =
@@ -433,20 +367,18 @@ int main()
 
     {
         odor::hardware::mock::MockSPIDevice spi(true);
-        odor::hardware::mock::MockGpioLine drdy(true);
         queueAdsBegin(spi);
-        for (size_t i = 0; i < odor::config::TgsChannelCount; ++i) {
-            const uint8_t muxValue =
-                static_cast<uint8_t>((odor::config::TgsChannels[i].ads114s06Ain << 4U) | 0x0CU);
-            queueAdsChannelRead(spi, muxValue, 0x0001);
-        }
-        drdy.setPersistentWaitResult(odor::hardware::HardwareResult::failure(-110, "timeout"));
-        odor::ADS114S06Driver driver(spi, &drdy, {true, true, false, true, false, 2.5F, odor::config::Ads114s06Defaults});
+        spi.queueRxData({});
+        odor::hardware::mock::MockGpioLine start(true);
+        odor::ADS114S06Driver driver(spi, nullptr, &start, {true, false, true, true, false, 2.5F, odor::config::Ads114s06Defaults});
         expect(driver.begin().ok);
-        odor::TgsArrayMeasurement measurement;
-        expect(driver.readTgsArray(measurement).ok);
-        expect(!odor::hasError(measurement.errorFlags, odor::ErrorFlag::Timeout));
-        expect(!odor::hasError(measurement.errorFlags, odor::ErrorFlag::NotReady));
+        expect(driver.stopConversions().ok);
+        expect(!start.wasEverWrittenHigh());
+        bool sawStop = false;
+        for (const auto& tx : spi.txHistory()) {
+            sawStop = sawStop || tx == std::vector<uint8_t>({0x0A});
+        }
+        expect(sawStop);
     }
 
     {
@@ -530,6 +462,59 @@ int main()
         const std::string csv = out.str();
         expect(csv.find("schema_version") != std::string::npos);
         expect(csv.find("TGS2610_VOUT_raw") != std::string::npos);
+    }
+
+    {
+        std::ostringstream out;
+        odor::TgsCsvLogger::writeHeader(out);
+        const std::string header = out.str();
+        expect(header == "timestamp_utc,elapsed_ms,"
+                         "tgs0_raw,tgs0_voltage_v,"
+                         "tgs1_raw,tgs1_voltage_v,"
+                         "tgs2_raw,tgs2_voltage_v,"
+                         "tgs3_raw,tgs3_voltage_v,"
+                         "tgs4_raw,tgs4_voltage_v,"
+                         "tgs5_raw,tgs5_voltage_v,"
+                         "error_flags\n");
+    }
+
+    {
+        const auto start = std::chrono::steady_clock::now();
+        odor::TgsArrayMeasurement measurement;
+        measurement.monotonicTimestamp = start + std::chrono::milliseconds(1234);
+        measurement.wallTimestamp = std::chrono::system_clock::time_point{std::chrono::seconds{1700000000}};
+        measurement.errorFlags = 0;
+        for (size_t i = 0; i < odor::config::TgsChannelCount; ++i) {
+            measurement.channelFresh[i] = true;
+            measurement.adcRaw[i] = static_cast<int32_t>(100 + i);
+            measurement.voltageV[i] = static_cast<float>(i) + 0.25F;
+        }
+
+        std::ostringstream out;
+        odor::TgsCsvLogger::writeScan(out, measurement, start);
+        const std::string row = out.str();
+        expect(row.find("2023-11-14T22:13:20Z,1234,100,0.25,101,1.25,102,2.25,103,3.25,104,4.25,105,5.25,0\n") !=
+               std::string::npos);
+    }
+
+    {
+        const auto start = std::chrono::steady_clock::now();
+        odor::TgsArrayMeasurement measurement;
+        measurement.monotonicTimestamp = start;
+        measurement.wallTimestamp = std::chrono::system_clock::time_point{std::chrono::seconds{1700000000}};
+        measurement.errorFlags = odor::toErrorFlags(odor::ErrorFlag::SpiFailure);
+
+        std::ostringstream out;
+        odor::TgsCsvLogger::writeScan(out, measurement, start);
+        const std::string row = out.str();
+        expect(row.find("2023-11-14T22:13:20Z,0,,,,,,,,,,,,") == 0U);
+        expect(row.find("," + std::to_string(measurement.errorFlags) + "\n") != std::string::npos);
+    }
+
+    {
+        const std::string filename =
+            odor::TgsCsvLogger::timestampedFilename(std::chrono::system_clock::time_point{std::chrono::seconds{1700000000}});
+        expect(filename == "tgs_timeseries_20231114_221320Z.csv");
     }
 
     return failures;
