@@ -1,555 +1,415 @@
 # AGENTS.md
 
-## 1. Purpose and Current Status
+## Mission
 
-This repository contains the Raspberry Pi 5 software for an intelligent odor-sensing system.
+Build a compact Python data-acquisition application for the Bosch E-nose prototype on a Raspberry Pi 5.
 
-Target platform:
+Two independently powered PCBs share one I2C bus:
 
-- Raspberry Pi 5
-- 64-bit Raspberry Pi OS
-- Linux user-space application
-- C++17 with CMake
-- Linux I2C, `spidev`, and GPIO character-device APIs
+- **TGS board:** six Figaro TGS sensors, ADS7828 ADC, SHT45.
+- **Electrochemical/environment board:** NH3 and H2S analog front ends with two MCP3421 ADCs, SGP41, BME690.
 
-This is not Arduino firmware. Use a normal `main()` and Linux/POSIX interfaces. Do not introduce PlatformIO, Arduino, ESP-IDF, `Wire`, `SPIClass`, FreeRTOS, wiringPi, deprecated GPIO sysfs, or direct `/dev/mem` access.
+The current scope is trustworthy 1 Hz time-series acquisition and CSV logging. Do not add ML inference, dashboards, networking, databases, actuators, or ppm conversion unless explicitly requested.
 
-### Current software status
+## Keep the implementation small
 
-The sensor-acquisition scaffold is already implemented and host-validated:
+- Use Python 3.11+ and `smbus2`.
+- Prefer a synchronous loop. Do not add threads or `asyncio` without measured need.
+- Do not introduce C++, CMake, bindings, plugin systems, dependency-injection frameworks, or a generic sensor hierarchy.
+- Each device driver should be one focused module with a small API.
+- Use dataclasses for returned samples.
+- Use `tomllib` for configuration.
+- Delete obsolete paths when behavior changes.
+- Keep byte-level diagnostics behind `--verbose`.
+- Never preserve old code merely because it may be useful later.
+- Before adding an abstraction, explain why a direct implementation is insufficient.
 
-- SHT45, SGP41, BME690, MCP3421, and ADS114S06 protocol logic exists.
-- BME690 behavior follows Bosch's official BME690/BME69x SensorAPI flow.
-- ADS114S06 register configuration follows the TI ADS114S06 datasheet and uses SPI mode 1.
-- ADS114S06 software selects the internal 2.5 V reference with reference input buffers disabled, keeps physical START/SYNC low, and controls conversions with serial START/STOP commands; this is host/mock-validated only and does not prove hardware communication.
-- Mock-based driver tests exist.
-- A stable versioned raw `SensorFrame` and CSV schema exist.
-- Windows/MinGW CMake builds and tests have passed.
+## Hardware source of truth
 
-This does **not** mean the system is hardware-verified.
-
-### Current development phase
-
-This specific Raspberry Pi 5 has now been inspected. The initial Linux device paths, GPIO controller, and Pi-to-board signal assignments are selected and may be used in a machine-specific runtime configuration.
-
-Pi-native ADS114S06 bring-up has confirmed SPI mode 1 at 1 MHz, device-ID validation, critical register readback, internal 2.5 V reference selection, serial START, INPMUX channel selection, and fixed-delay RDATA reads for AIN0-AIN5 against AINCOM. Normal TGS acquisition records one complete six-channel scan per CSV row. This validates the ADS/TGS acquisition path only; it does not validate calibration, TGS gas conversion, integrated multi-sensor operation, or long-duration stability.
-
-The next phase is native build and physical-board validation:
-
-1. Add or update the machine-specific runtime configuration with the selected paths and GPIO mappings in Section 3.
-2. Build and run mock tests natively on Raspberry Pi 5.
-3. Connect both boards using the documented wiring.
-4. Confirm the five expected I2C addresses on `/dev/i2c-1`.
-5. Run ADS114S06/TGS CSV acquisition long enough to evaluate stability, saturation, noise, and disconnect behavior.
-6. Tune provisional ADC and timing parameters from real measurements.
-7. Run stable multi-sensor CSV acquisition and fault tests.
-
-Do not redesign completed drivers or schemas unless a verified hardware result, official documentation, or demonstrated defect requires it.
-
----
-
-## 2. Confirmed Sensor and Board Contract
-
-The system contains 11 physical sensors.
-
-### I2C devices
-
-Use these confirmed 7-bit addresses:
-
-| Device | Address |
-|---|---:|
-| SHT45-AD1F-R2 | `0x44` |
-| SGP41-D-R4 | `0x59` |
-| NH3 MCP3421A1T-E/CH | `0x69` |
-| H2S MCP3421A2T-E/CH | `0x6A` |
-| BME690 | `0x76` |
-
-BME690 is in I2C mode because:
+Store exports under:
 
 ```text
-CSB -> VDD3V3
-SDO -> DGND
+hardware/
+  tgs_board/
+    schematic.pdf
+    netlist.tel
+    bom.xlsx
+    pcb.pdf
+    interactive_bom.html
+  electrochemical_board/
+    schematic.pdf
+    netlist.tel
+    bom.xlsx
+    pcb.pdf
+    interactive_bom.html
 ```
 
-For this Raspberry Pi integration, Board 1 and the Board 2 SHT45 are assigned to the standard header I2C bus at `/dev/i2c-1`, using BCM GPIO2 for SDA and BCM GPIO3 for SCL. The architecture must still permit per-board or per-device adapter overrides. The selected bus and wiring remain subject to connected-board validation.
+Resolve hardware facts in this order:
 
-### Mixed TGS array through ADS114S06
+1. Schematic and netlist
+2. Exact BOM part number
+3. Official manufacturer datasheet
+4. PCB layout / interactive BOM
+5. Existing software only as historical reference
 
-The six TGS sensors are distinct models:
+Do not copy assumptions from the previous ADS114S06/C++ repository. The redesigned TGS board uses **ADS7828 over I2C**, not ADS114S06 over SPI.
+
+Stop and report any conflict between the schematic, netlist, BOM, and datasheet. Do not guess.
+
+Official references:
+
+- ADS7828: https://www.ti.com/lit/ds/symlink/ads7828.pdf
+- MCP3421: https://ww1.microchip.com/downloads/en/devicedoc/22003e.pdf
+- SHT4x: https://sensirion.com/resource/datasheet/sht4x
+- SGP41: https://sensirion.com/resource/datasheet/sgp41
+- BME690: https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme690-ds001.pdf
+
+## Raspberry Pi wiring
+
+Target:
+
+- Raspberry Pi 5 / Raspberry Pi OS Bookworm
+- I2C device: `/dev/i2c-1`
+- SDA: GPIO2, physical pin 3
+- SCL: GPIO3, physical pin 5
+- Common ground required
+
+Both boards are powered through their own USB-C ports. Their H1 headers do not supply power to the Pi. Do not connect Pi 3.3 V or 5 V to H1.
+
+### Connector warning
+
+The two boards swap the SDA and SCL header positions.
+
+**Electrochemical board H1**
+
+| Pin | Net |
+|---:|---|
+| 1 | SENSOR_SDA |
+| 2 | DGND |
+| 3 | SENSOR_SCL |
+| 4 | DGND |
+| 5 | NC |
+| 6 | DGND |
+
+**TGS board H1**
+
+| Pin | Net |
+|---:|---|
+| 1 | SCL |
+| 2 | DGND |
+| 3 | SDA |
+| 4 | DGND |
+| 5 | NC |
+| 6 | DGND |
+
+Wire by net name, not by matching pin number. Both boards already contain I2C pull-ups; do not add more by default.
+
+## I2C device map
+
+All addresses are 7-bit.
+
+| Address | Device | Board |
+|---:|---|---|
+| `0x44` | SHT45-AD1F-R2 | TGS |
+| `0x48` | ADS7828E/2K5 | TGS |
+| `0x59` | SGP41-D-R4 | Electrochemical |
+| `0x69` | MCP3421A1T-E/CH, NH3 | Electrochemical |
+| `0x6A` | MCP3421A2T-E/CH, H2S | Electrochemical |
+| `0x76` | BME690 | Electrochemical |
+
+When all devices are powered, `probe` should expect:
 
 ```text
-ADS114S06 AIN0 -> TGS2610_VOUT
-ADS114S06 AIN1 -> TGS2620_VOUT
-ADS114S06 AIN2 -> TGS2603_VOUT
-ADS114S06 AIN3 -> TGS2602_VOUT
-ADS114S06 AIN4 -> TGS2600_VOUT
-ADS114S06 AIN5 -> TGS2611_VOUT
-ADS114S06 AINCOM -> AGND
+0x44 0x48 0x59 0x69 0x6A 0x76
 ```
 
-Treat each TGS model as a separate logical sensor with separate metadata, baseline, and later calibration.
+An ACK proves only that an address responds. Use identity/self-test checks where available.
 
-The Raspberry Pi communicates with ADS114S06, not directly with the TGS sensors.
+## TGS board
 
-### Board 1 connector
+### ADS7828 channel mapping
 
-Confirmed CN1 signals:
+| ADS channel | Sensor signal |
+|---:|---|
+| CH0 | TGS2620 |
+| CH1 | TGS2610 |
+| CH2 | TGS2611 |
+| CH3 | TGS2600 |
+| CH4 | TGS2602 |
+| CH5 | TGS2603 |
+| CH6 | AGND, unused |
+| CH7 | AGND, unused |
+
+Do not use the old ADS114S06 channel order.
+
+### ADS7828 protocol
+
+Hardware configuration:
+
+- Address `0x48`
+- VDD 3.3 V
+- COM connected to AGND
+- A0 and A1 grounded
+- Internal 2.5 V reference
+- Single-ended 12-bit readings
+
+Command byte:
 
 ```text
-CN1 pin 1 -> SENSOR_SCL
-CN1 pin 2 -> DGND
-CN1 pin 3 -> SENSOR_SDA
-CN1 pin 4 -> DGND
-CN1 pins 5 and 6 -> unconfirmed; do not use
+bit 7      SD       1 = single-ended
+bits 6:4   C2:C0    channel selection code
+bits 3:2   PD1:PD0  11 = internal reference on, ADC on
+bits 1:0            00
 ```
 
-Board 1 places SGP41, BME690, NH3 MCP3421, and H2S MCP3421 on `SENSOR_SDA` and `SENSOR_SCL`.
+Physical channel and command mapping:
 
-### Board 2 ADS114S06 connector
+| Channel | C2:C0 | Command |
+|---:|---:|---:|
+| CH0 | `000` | `0x8C` |
+| CH1 | `100` | `0xCC` |
+| CH2 | `001` | `0x9C` |
+| CH3 | `101` | `0xDC` |
+| CH4 | `010` | `0xAC` |
+| CH5 | `110` | `0xEC` |
+| CH6 | `011` | `0xBC` |
+| CH7 | `111` | `0xFC` |
 
-Confirmed CN1 signals:
+Startup:
 
-```text
-CN1 pin 1 -> START
-CN1 pin 2 -> DIN   (Raspberry Pi MOSI)
-CN1 pin 3 -> SCLK
-CN1 pin 4 -> DOUT  (Raspberry Pi MISO)
-CN1 pin 5 -> DRDY#
-CN1 pin 6 -> AGND
+1. Send a command with the internal reference enabled.
+2. Wait at least 2 ms.
+3. Discard the first conversion.
+4. Keep `PD1 = 1` in every later command.
+
+Read two bytes and parse:
+
+```python
+raw = ((byte0 & 0x0F) << 8) | byte1
+voltage_v = raw * 2.5 / 4096.0
 ```
 
-Confirmed ADS114S06 board facts:
-
-```text
-CS#     -> DGND      (permanently selected)
-RESET#  -> IOVDD     (no Raspberry Pi reset line)
-CLK     -> DGND      (internal clock configuration)
-AVDD    -> 5 V analog rail
-DVDD    -> 3.3 V
-IOVDD   -> 3.3 V
-REFP0   -> external 4.096 V reference from REF5040AIDR
-REFN0   -> AGND
-```
-
-The current software profile does not select the external REF5040 path. It uses the ADS114S06 internal 2.5 V reference and keeps REFP/REFN input buffers disabled.
-
-The ADC is the sole active device on its physical SPI data lines. Do not add an ADS chip-select GPIO. A Raspberry Pi CE line may be needed only to expose a `spidev` node and may remain physically unconnected.
-
-### Board 2 SHT45 pads
-
-```text
-Pad 1 -> SHT45_SDA
-Pad 2 -> SHT45_SCL
-Pad 3 -> VDD3V3
-Pad 4 -> AGND
-```
-
-Under the current independent-power plan, connect SDA, SCL, and GND only. Do not connect Raspberry Pi 3.3 V to Pad 3 unless the power architecture is intentionally changed and revalidated.
-
-### Electrochemical front ends
-
-Provisional assembly assumption:
-
-```text
-NH3 JP2 = OPEN -> three-electrode sensor
-H2S JP2 = OPEN -> three-electrode sensor
-```
-
-This must later be checked from the assembled boards, BOM, solder links, or continuity measurement.
-
-Confirmed front-end facts:
-
-```text
-MCP3421 VIN+ -> TIA output
-MCP3421 VIN- -> VBIAS
-VBIAS nominal -> approximately 1.65 V
-TIA feedback resistor -> 1 MOhm
-TIA feedback capacitor -> 10 uF
-TIA input series resistor -> 100 Ohm
-Output low-pass resistor -> 49.9 kOhm
-Output low-pass capacitor -> 10 uF
-```
-
-Do not fix the final electrochemical sign convention until validated with known gas exposure and actual sensor orientation.
-
-### Power plan
-
-```text
-Raspberry Pi 5 -> independently powered
-Board 1         -> independently powered through its USB-C input
-Board 2         -> independently powered through its USB-C input
-All three       -> common ground
-```
-
-Do not parallel Raspberry Pi 3.3 V or 5 V with either board's regulated rail. Before joining I2C domains, validate common ground, 3.3 V logic, effective pull-up resistance, and back-powering behavior when a board is off.
-
-
----
-
-## 3. Selected Raspberry Pi Integration Profile
-
-The following values were observed or selected for the current Raspberry Pi 5 Model B Rev 1.1 running 64-bit Debian 12. Store them in a machine-specific runtime configuration. Do not bury them inside low-level drivers.
-
-### Linux resources
-
-```text
-shared I2C adapter -> /dev/i2c-1
-ADS SPI device     -> /dev/spidev0.0
-SPI mode           -> mode 1
-SPI clock          -> 1 MHz provisional
-GPIO controller    -> /dev/gpiochip4
-expected GPIO label-> pinctrl-rp1
-START line offset  -> 17, active high
-DRDY# line offset  -> 27, active low
-```
-
-The current user is already a member of the `i2c`, `spi`, and `gpio` groups. Do not modify user groups unless a later permission check demonstrates a problem.
-
-### Physical-header and BCM assignments
-
-| Function | Physical pin | BCM GPIO | Board connection |
-|---|---:|---:|---|
-| Shared I2C SDA | 3 | GPIO2 | Board 1 CN1 pin 3 and Board 2 SHT45 pad 1 |
-| Shared I2C SCL | 5 | GPIO3 | Board 1 CN1 pin 1 and Board 2 SHT45 pad 2 |
-| Shared I2C ground | 6 | GND | Board 1 CN1 pin 2 or 4 and Board 2 SHT45 pad 4 |
-| ADS MOSI | 19 | GPIO10 | Board 2 CN1 pin 2, DIN |
-| ADS MISO | 21 | GPIO9 | Board 2 CN1 pin 4, DOUT |
-| ADS SCLK | 23 | GPIO11 | Board 2 CN1 pin 3, SCLK |
-| ADS START | 11 | GPIO17 | Board 2 CN1 pin 1, START |
-| ADS DRDY# | 13 | GPIO27 | Board 2 CN1 pin 5, DRDY# |
-| ADS ground | 20 | GND | Board 2 CN1 pin 6, AGND |
-
-Raspberry Pi CE0 at physical pin 24 is not connected to the board. `/dev/spidev0.0` may still toggle CE0 internally, but the ADS114S06 `CS#` is permanently tied low on Board 2.
-
-These assignments finalize the initial software integration configuration. They are not yet proof of electrical or protocol correctness; connected-board tests must still verify bus visibility, pinmux, signal behavior, and stable acquisition.
-
----
-
-## 4. Safety and Information That Must Not Be Invented
-
-Raspberry Pi GPIO uses 3.3 V logic. Never drive a 5 V signal into a Pi GPIO. Do not power sensors, heaters, pumps, valves, displays, or blowers directly from a GPIO.
-
-Keep these identifiers distinct:
-
-```text
-Physical header pin
-BCM GPIO number
-Linux gpiochip identity
-GPIO line offset
-Application signal name
-```
-
-The machine-specific paths and mappings in Section 3 are selected for this Pi and may be used. Do not silently change them, substitute different buses or pins, or describe them as hardware-verified without new evidence.
-
-Never silently guess:
-
-- final ADS114S06 clock, PGA, data rate, digital filter, channel settling, or conversion sequence
-- final START behavior or measured DRDY# edge/timing behavior
-- final MCP3421 gain, resolution, or conversion mode
-- electrochemical polarity, zero offset, calibrated sensitivity, or ppm conversion
-- TGS heater behavior, `R0`, `Rs/R0`, or gas conversion
-- actuator or display wiring
-- boot overlays, udev rules, system services, or privilege changes not explicitly requested
-
-When required information is missing:
-
-1. Keep it runtime-configurable.
-2. Leave hardware access disabled when safe operation is not possible.
-3. Add a clear TODO or error.
-4. State what measurement, schematic, OS, or datasheet information is required.
-5. Do not substitute a plausible-looking value.
-
-Provisional defaults are allowed only when they are manufacturer-supported, clearly labeled, runtime-configurable, and not described as hardware-validated.
-
----
-
-## 5. Provisional Runtime Profile
-
-These defaults support initial integration and may change after real measurements.
-
-### Shared I2C
-
-- The machine-specific configuration should use `/dev/i2c-1` for Board 1 and SHT45.
-- The generic example configuration should keep machine-specific paths unset or clearly marked as examples.
-- Serialize access when multiple drivers share the adapter.
-- Permit per-device or per-board overrides.
-- Do not treat the bus as hardware-validated until the connected scan shows `0x44`, `0x59`, `0x69`, `0x6A`, and `0x76`.
-- Keep these machine-specific values in a local TOML file; preserve a portable generic example configuration.
+Flag values near 0 or 4095 as possible short/open/saturation conditions. Do not convert TGS voltage to ppm without an explicit calibration model.
 
 ### SHT45
 
-- 1 Hz target cadence
-- high-precision command
-- heater off during normal acquisition
-- CRC required
-- retain temperature and relative humidity
+- Address `0x44`.
+- Validate Sensirion CRC for every returned word.
+- Return temperature in °C and RH in %.
+- Do not hide smoothing inside the driver.
+
+## Electrochemical/environment board
+
+### MCP3421 mapping
+
+| Channel | Device/address | VIN+ | VIN- |
+|---|---|---|---|
+| NH3 | A1 option, `0x69` | TIA_VOUT_1 | VBIAS |
+| H2S | A2 option, `0x6A` | TIA_VOUT | VBIAS |
+
+Expose resolution, gain, and mode in TOML. Default configuration may use 18-bit, gain 1, continuous mode, but it must remain configurable.
+
+Decode signed 12/14/16/18-bit data correctly. Use:
+
+```python
+voltage_v = raw * 2.048 / ((2 ** (resolution_bits - 1)) * gain)
+```
+
+Check the returned RDY bit. Log raw code and differential voltage. Do not report NH3 or H2S ppm without validated calibration coefficients and the complete analog transfer function.
 
 ### SGP41
 
-- 1 Hz command cadence
-- use sufficiently recent valid SHT45 compensation
-- retain `SRAW_VOC` and `SRAW_NOX`
-- keep VOC/NOx indices separate from raw values
-- report conditioning and stale-compensation states explicitly
+- Address `0x59`.
+- Validate all CRC bytes.
+- After power-up or heater-off, condition for 10 seconds; never exceed 10 seconds.
+- Then measure once per second.
+- Each raw measurement may take up to 50 ms.
+- Use current SHT45 RH/T values for humidity compensation.
+- If current SHT45 data are unavailable, mark compensation unavailable; do not use stale or invented values.
+- Log `sraw_voc` and `sraw_nox`.
+- Add VOC/NOx indices only through Sensirion's official Gas Index Algorithm at 1 Hz.
+- Turn the heater off on graceful shutdown.
 
 ### BME690
 
-- I2C address `0x76`
-- manufacturer-supported forced-measurement flow
-- configurable oversampling, filter, heater temperature, heater duration, and interval
-- retain temperature, humidity, pressure, gas resistance, gas-valid, and heater-stable status
+- Address `0x76`.
+- Verify chip identity during probing.
+- Use Bosch's official BME68x/BME690 API or a Python driver explicitly verified for BME690.
+- Do not assume a BME680/BME688 library fully supports BME690.
+- Keep the adapter small.
+- Log compensated temperature, humidity, pressure, gas resistance, gas-valid, and heater-stable fields when available.
+- Keep heater/profile settings in TOML.
+- Do not add BSEC/BME AI outputs unless the required Bosch software and configuration are explicitly introduced.
+- BME690 failure must not stop otherwise valid acquisition.
 
-### MCP3421
-
-Initial example profile:
-
-```text
-resolution -> 16 bit
-PGA gain   -> x1
-mode       -> one-shot
-```
-
-Keep all three runtime-configurable. Retain signed raw code and differential voltage only. Do not report sensor current or ppm as valid.
-
-### ADS114S06
-
-Confirmed and initial settings:
+## Repository structure
 
 ```text
-reference   -> internal 2.5 V, REFP/REFN input buffers disabled
-SPI device  -> /dev/spidev0.0 for this Pi
-SPI mode    -> mode 1
-SPI clock   -> 1 MHz provisional
-GPIO chip   -> /dev/gpiochip4, expected label pinctrl-rp1
-START       -> line 17, active high
-DRDY#       -> line 27, active low
-PGA         -> x1 provisional
-channels    -> confirmed AIN0-AIN5 mapping
-conversion  -> physical START/SYNC held low; serial START once after configuration, 80 ms after each INPMUX change, RDATA [0x12, 0x00, 0x00], serial STOP on shutdown
+AGENTS.md
+README.md
+pyproject.toml
+config/rpi5.toml
+hardware/
+src/enose/
+  __init__.py
+  cli.py
+  config.py
+  i2c_bus.py
+  acquisition.py
+  csv_logger.py
+  records.py
+  ads7828.py
+  mcp3421.py
+  sht45.py
+  sgp41.py
+  bme690.py
+tests/
+data/raw/
 ```
 
-Keep clock, PGA, data rate, digital filter, scan interval, and any future conversion-sequencing changes configurable. Retain signed raw code and ADC input voltage only.
+Do not add more layers or directories without a concrete need.
 
----
+## CLI
 
-## 6. Software Architecture and Driver Rules
-
-Preserve the existing separation of responsibilities:
-
-- `hardware/linux/`: Linux file descriptors, I2C, SPI, and GPIO access
-- `hardware/mock/`: deterministic test doubles
-- `drivers/`: manufacturer command, register, CRC, status, and compensation logic
-- `sensors/`: later physical conversion and calibration logic
-- `services/`: scheduling, coordination, logging, and application lifecycle
-- runtime configuration: device paths, GPIO mappings, and tunable settings
-- `sensor_types.h`: shared measurement structures
-
-Drivers must:
-
-- accept explicit bus/device abstractions
-- return explicit success, status, and error information
-- check all transaction results
-- implement bounded timeouts
-- preserve raw measurements
-- distinguish not-ready, invalid, stale, saturated, and communication-failed states
-- remain mock-testable
-- avoid blocking forever
-
-Drivers must not:
-
-- open arbitrary device paths internally
-- print routine output directly
-- call `exit()`
-- assume root access
-- fabricate values when hardware is unavailable
-- replace invalid readings with zero
-- contain project calibration constants
-- implement display, actuator, experiment-label, or ML behavior
-
-Use official manufacturer documentation as the source of truth for commands, registers, CRC, timing, compensation, and transfer equations. Do not invent register values.
-
-Source precedence:
-
-1. final schematic and PCB/BOM
-2. verified Pi-to-board wiring document
-3. manufacturer datasheet or official SensorAPI/reference code
-4. Raspberry Pi and Linux kernel documentation
-5. existing hardware-verified project code
-
-Stop and report conflicts instead of guessing.
-
----
-
-## 7. Data, Scheduling, and Logging Contract
-
-The existing versioned raw `SensorFrame` and CSV schema are part of the acquisition contract. Preserve stable field meaning and order within a schema version.
-
-Required data categories:
-
-- schema version
-- monotonic timing and wall-clock timestamp
-- system state
-- six TGS signed raw codes and ADC voltages in this fixed order:
-  - TGS2610
-  - TGS2620
-  - TGS2603
-  - TGS2602
-  - TGS2600
-  - TGS2611
-- NH3 and H2S signed MCP3421 raw codes and differential voltages
-- SGP41 `SRAW_VOC` and `SRAW_NOX`
-- BME690 temperature, humidity, pressure, gas resistance, gas-valid, and heater-stable
-- SHT45 temperature and humidity
-- per-sensor timestamps or age/freshness information
-- validity and error flags
-
-Do not present these as valid until calibration is completed:
-
-```text
-TGS resistance or Rs/R0
-TGS gas concentration
-NH3 or H2S sensor current
-NH3 or H2S ppm
-odor classification
-```
-
-Use `std::chrono::steady_clock` for scheduling and deadlines. Use wall-clock time for files and experiment records. Do not assume all sensors update at the same rate.
-
-Use edge events, `poll()`, or bounded polling for DRDY. Avoid busy loops and unbounded sleeps.
-
-A single sensor failure should normally produce an invalid/error state without freezing the complete acquisition system.
-
-CSV requirements:
-
-- stable column order per schema version
-- explicit timestamps, validity, and errors
-- no fabricated zero values
-- diagnostics separate from measurement rows
-- configurable output path and enable flag
-- clear failure when the output file cannot be opened
-- safe flush and close on shutdown
-
-Production log rotation, disk quotas, crash recovery, and abrupt-power-loss guarantees remain deferred.
-
----
-
-## 8. Raspberry Pi Integration and Validation
-
-### Native build
-
-Use:
+Implement:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+python -m enose probe --config config/rpi5.toml
+python -m enose diagnose --config config/rpi5.toml
+python -m enose acquire --config config/rpi5.toml
 ```
 
-Do not claim hardware verification from compilation or mock tests.
+- `probe`: check expected addresses and identities; concise table.
+- `diagnose`: one complete read from enabled devices; detailed bytes only with `--verbose`.
+- `acquire`: continuous time-series recording; default one frame per second.
 
-### Hardware integration order
+Required devices may fail the command. Optional device failures must be reported without blocking the remaining sensors.
 
-Validate in this order:
+## Acquisition loop
 
-1. Create the machine-specific runtime configuration from Section 3.
-2. Run the Raspberry Pi native build and mock tests.
-3. Recheck device nodes, GPIO label, pinmux, and permissions.
-4. With all systems unpowered, complete the documented wiring and common-ground connection.
-5. Power the Pi and both independently powered boards; verify no unintended rail connection or back-powering.
-6. Scan `/dev/i2c-1` and confirm all five expected addresses.
-7. Validate SHT45, SGP41, BME690, and both MCP3421 devices individually.
-8. Validate ADS114S06 SPI, START, DRDY#, register readback, and six TGS channels.
-9. Run integrated SensorManager and CSV logging.
-10. Run extended stability, disconnect, and clean-shutdown tests.
+Prefer this synchronous order:
 
-Expected I2C addresses on the provisional shared bus:
+1. Start UTC and monotonic frame timestamps.
+2. Read SHT45.
+3. Trigger/read SGP41 with current RH/T compensation.
+4. Read all six ADS7828 channels.
+5. Read NH3 and H2S MCP3421 values.
+6. Read BME690.
+7. Assemble one immutable frame.
+8. Write one CSV row.
+9. Sleep until the next absolute monotonic deadline.
+
+Do not use `sleep(1)` after each completed frame because that accumulates drift. Advance from absolute deadlines.
+
+Never reuse a previous sensor value as if it were current.
+
+## CSV contract
+
+Create a timestamped file in `data/raw/`, one row per logical frame, UTC ISO-8601 timestamps with `Z`.
+
+Minimum fields:
 
 ```text
-0x44  SHT45
-0x59  SGP41
-0x69  NH3 MCP3421
-0x6A  H2S MCP3421
-0x76  BME690
+timestamp_utc, elapsed_s, sequence, frame_duration_ms, deadline_miss_ms
+
+sht45_temperature_c, sht45_relative_humidity_pct, sht45_ok
+
+tgs2620_raw, tgs2620_voltage_v
+tgs2610_raw, tgs2610_voltage_v
+tgs2611_raw, tgs2611_voltage_v
+tgs2600_raw, tgs2600_voltage_v
+tgs2602_raw, tgs2602_voltage_v
+tgs2603_raw, tgs2603_voltage_v
+ads7828_ok
+
+nh3_raw, nh3_diff_voltage_v, nh3_ok
+h2s_raw, h2s_diff_voltage_v, h2s_ok
+
+sgp41_sraw_voc, sgp41_sraw_nox
+sgp41_voc_index, sgp41_nox_index
+sgp41_compensated, sgp41_ok
+
+bme690_temperature_c
+bme690_relative_humidity_pct
+bme690_pressure_pa
+bme690_gas_resistance_ohm
+bme690_gas_valid
+bme690_heater_stable
+bme690_ok
+
+error_codes
 ```
 
-Do not repeatedly scan I2C during normal acquisition and do not probe unknown addresses in production mode.
+Rules:
 
-### Required real-hardware checks
+- Missing values are empty/NaN, not zero.
+- `*_ok` means the frame contains a new valid sample.
+- Never substitute a stale value after a failed read.
+- `error_codes` uses concise machine-readable codes separated by semicolons.
+- Write a sidecar metadata JSON/TOML containing effective configuration, software commit, hostname, start time, and enabled devices.
+- Flush at least every 10 rows and always on shutdown.
+- Keep column order stable; schema changes require a version.
 
-The selected paths and mappings are documented in Section 3. On the target Pi, confirm that they still exist after boot and then verify:
+## Configuration
 
-- `/dev/i2c-1`, `/dev/spidev0.0`, and `/dev/gpiochip4` are accessible
-- `/dev/gpiochip4` has label `pinctrl-rp1`
-- GPIO2/3 are muxed for I2C and GPIO9/10/11 for SPI0
-- GPIO17 and GPIO27 are available before the application requests them
-- the current user can access I2C, SPI, and GPIO without running the application as root
-- SPI mode 1 and a stable initial clock
-- ADS register readback
-- actual DRDY# active edge and timeout behavior
-- START behavior and selected conversion sequence
-- channel settling after mux changes
-- ADC saturation and noise
-- appropriate ADS PGA, data rate, and filter
-- appropriate MCP3421 mode, resolution, and gain
-- I2C pull-up and back-powering behavior
-- behavior when a sensor is disconnected or unpowered
-- clean shutdown and CSV integrity
+Use `config/rpi5.toml` with explicit addresses, enable/required flags, acquisition interval, output directory, MCP3421 settings, and BME690 heater/profile settings.
 
-Recommended acceptance tests:
+Protocol constants belong in drivers, not in configuration.
 
-- all devices initialize and provide plausible nonconstant readings
-- every sensor failure maps to explicit validity/error fields
-- 30-60 minutes of complete acquisition without deadlock or corrupted CSV
-- one disconnect/failure test
-- one normal `SIGINT`/`SIGTERM` shutdown test
+## Errors and logging
 
-Raw data acquisition is hardware-complete only after these checks pass. Calibration and odor classification remain separate later phases.
+- Use clear driver exceptions.
+- Convert exceptions to frame status at the acquisition boundary.
+- Limit retries to 0 or 1 by default.
+- Distinguish NACK, CRC failure, timeout/not-ready, invalid identity, saturation, and parse errors.
+- Put stack traces in the application log, not the CSV.
+- Never fabricate measurements.
+- Unit tests prove protocol logic; only Raspberry Pi tests prove hardware operation.
 
-Do not edit boot overlays, user groups, udev rules, services, or system configuration without explicit permission. Document required commands instead.
+## Tests
 
----
+Use `pytest` with small fake I2C responses.
 
-## 9. Testing, Coding, and Change Rules
+Required coverage:
 
-Use RAII for Linux resources. Use fixed-width integer types where data width matters. Include units in names such as `VoltageV`, `PressurePa`, `TimeoutMs`, and `ResistanceOhm`. Keep functions focused and compile with warnings enabled.
+- ADS7828 channel-command mapping, parsing, 2.5 V conversion, sensor order, saturation.
+- MCP3421 signed parsing for all resolutions, RDY, gain, voltage conversion, byte count.
+- SHT45/SGP41 CRC validation.
+- SGP41 RH/T tick conversion, conditioning limit, 1 Hz behavior.
+- One failed sensor does not corrupt other fields.
+- Failed values remain missing, not stale.
+- Stable CSV header/order.
+- Deadline scheduler does not accumulate drift.
+- Graceful shutdown flushes/closes and turns off SGP41 heater.
 
-Mock/unit tests should cover applicable cases including:
+Do not build a large hardware simulator.
 
-- command and register encoding
-- CRC success and failure
-- byte order and signed conversion
-- ready/not-ready behavior
-- timeout and communication failure
-- register mismatch
-- saturation or invalid status
-- stale compensation and stale sensor data
-- missing hardware configuration
-- partial sensor failure
-- raw-to-voltage calculations
+## Raspberry Pi validation
 
-Hardware tests must be separate from ordinary unit tests and must identify the target adapter/device explicitly.
+Before claiming completion:
 
-After changes:
+1. Confirm `/dev/i2c-1` access.
+2. Run `i2cdetect -y 1`.
+3. Run `probe`.
+4. Run `diagnose`.
+5. Run `acquire` for at least 60 seconds.
+6. Verify one row per frame, correct TGS mapping, SGP41 1 Hz operation, visible CRC/NACK failures, and clean Ctrl+C shutdown.
+7. Compare representative analog voltages with a multimeter when practical.
+8. Do not claim ppm accuracy or classification performance.
 
-1. run supported CMake configure, build, and tests;
-2. report changed files and behavior;
-3. distinguish host/mock validation from Pi and hardware validation;
-4. state assumptions and remaining hardware TODOs;
-5. do not commit automatically unless explicitly requested.
+## Rules for Codex changes
 
----
+For every change:
 
-## 10. Deferred Scope
-
-Do not implement these unless explicitly requested and required information is available:
-
-- calibrated NH3/H2S ppm
-- final electrochemical polarity and zero correction
-- TGS `R0`, `Rs/R0`, or gas concentration
-- odor classification or ML inference
-- pump, valve, blower, or heater control
-- display or touch integration
-- production systemd deployment
-- production-grade storage management
-
-Sensor acquisition must remain independent of future display, actuator, and ML components.
+1. Read this file and the relevant hardware exports.
+2. State the smallest planned change.
+3. Preserve validated behavior.
+4. Remove superseded code and tests in the same change.
+5. Do not add temporary debug logs or investigation history to this file.
+6. Update this file only for stable hardware facts or permanent workflows.
+7. Report:
+   - files changed
+   - obsolete files/paths removed
+   - tests run
+   - Raspberry Pi commands
+   - remaining hardware assumptions

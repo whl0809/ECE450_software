@@ -1,59 +1,8 @@
-# CMake build outputs
-build/
-build-*/
-cmake-build-*/
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-CTestTestfile.cmake
-Testing/
-compile_commands.json
-command.sh
-
-# Binaries and generated artifacts
-*.o
-*.obj
-*.a
-*.lib
-*.so
-*.dll
-*.dylib
-*.exe
-*.elf
-*.bin
-*.map
-
-# PlatformIO / old ESP32 leftovers
-.pio/
-.pioenvs/
-.piolibdeps/
-platformio.ini.bak
-
-# Local runtime configuration
-config/odor-sensing.toml
-*.local.toml
-*.secret.toml
-
-# Logs / sensor output
-logs/
-data/
-*.log
-*.csv
-
-# Python/tool caches
+.venv/
 __pycache__/
-*.pyc
 .pytest_cache/
-
-# IDE/editor
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.example.json
-.idea/
-*.swp
-*.swo
-
-# OS noise
-.DS_Store
-Thumbs.db
-desktop.ini
+tmp/
+src/*.egg-info/
+*.py[cod]
+data/raw/*.csv
+data/raw/*.json

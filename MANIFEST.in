@@ -1,0 +1,2 @@
+include src/enose/_bme69xmodule.c
+recursive-include src/enose/_vendor/bme690 *.c *.h LICENSE
